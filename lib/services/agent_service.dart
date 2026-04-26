@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'app_mode_service.dart';
 import 'settings_service.dart';
 
 enum AgentState { disconnected, connecting, connected, thinking }
@@ -13,32 +14,44 @@ class AgentMessage {
   final Map<String, dynamic>? meta;
   final DateTime time;
 
-  AgentMessage({
-    required this.role,
-    required this.text,
-    this.meta,
-  }) : time = DateTime.now();
+  AgentMessage({required this.role, required this.text, this.meta})
+      : time = DateTime.now();
 }
 
+/// Dual-mode agent.
+///
+///   • Cloud mode: send `messages` directly to the configured AI provider over
+///     HTTPS. No tools, just chat. Always "connected" once a key is set.
+///
+///   • Local mode: existing WebSocket protocol against ws://localhost:8080.
 class AgentService extends ChangeNotifier {
   static const startCommand = '~/omni-ide/start_agent.sh';
   static const agentUrl = 'http://localhost:8080';
 
   final _settings = SettingsService();
+  final AppModeService modeService;
 
-  WebSocketChannel? _channel;
-  StreamSubscription? _sub;
+  AgentService(this.modeService) {
+    modeService.addListener(_onModeChanged);
+  }
 
+  // ── State ───────────────────────────────────────────
   AgentState _state = AgentState.disconnected;
   AgentState get state => _state;
-
-  final List<AgentMessage> _messages = [];
-  List<AgentMessage> get messages => List.unmodifiable(_messages);
 
   String _statusText = 'Disconnected';
   String get statusText => _statusText;
 
-  // Auto-retry
+  final List<AgentMessage> _messages = [];
+  List<AgentMessage> get messages => List.unmodifiable(_messages);
+
+  AppMode get mode => modeService.mode;
+
+  // Local-mode WebSocket
+  WebSocketChannel? _channel;
+  StreamSubscription? _sub;
+
+  // Auto-retry (local mode only)
   Timer? _retryTimer;
   int _retryAttempt = 0;
   int _retryCountdown = 0;
@@ -46,8 +59,25 @@ class AgentService extends ChangeNotifier {
   bool _autoRetry = true;
   bool get autoRetry => _autoRetry;
 
-  // ── Connect ──────────────────────────────────
+  void _onModeChanged() {
+    // Tear down WS if user switched to cloud, or kick off connection on local.
+    if (modeService.mode == AppMode.cloud) {
+      _sub?.cancel();
+      _channel?.sink.close();
+      _channel = null;
+      _cancelRetry();
+      _enterCloudReady();
+    } else {
+      connect();
+    }
+  }
+
+  // ── Public API ──────────────────────────────────────
   Future<void> connect({bool fromUser = false}) async {
+    if (modeService.mode == AppMode.cloud) {
+      _enterCloudReady();
+      return;
+    }
     if (_state == AgentState.connected || _state == AgentState.connecting) {
       return;
     }
@@ -56,7 +86,6 @@ class AgentService extends ChangeNotifier {
       _cancelRetry();
     }
     _setState(AgentState.connecting, 'Connecting...');
-
     try {
       _channel = WebSocketChannel.connect(Uri.parse('ws://localhost:8080'));
       _sub = _channel!.stream.listen(
@@ -71,7 +100,6 @@ class AgentService extends ChangeNotifier {
   }
 
   /// Probe the agent HTTP /ping endpoint without opening a WebSocket.
-  /// Returns the model string on success, or null on failure.
   Future<String?> ping() async {
     try {
       final res = await http
@@ -79,7 +107,9 @@ class AgentService extends ChangeNotifier {
           .timeout(const Duration(seconds: 4));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
-        return data['model']?.toString() ?? data['agent']?.toString() ?? 'alive';
+        return data['model']?.toString() ??
+            data['agent']?.toString() ??
+            'alive';
       }
     } catch (_) {}
     return null;
@@ -91,16 +121,154 @@ class AgentService extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── Sending ─────────────────────────────────────────
+  Future<void> sendMessage(String text) async {
+    if (text.trim().isEmpty) return;
+
+    // Snapshot history BEFORE the new user turn is appended.
+    final priorHistory = _messages
+        .where((m) => m.role == 'user' || m.role == 'agent')
+        .map((m) => {
+              'role': m.role == 'agent' ? 'assistant' : 'user',
+              'content': m.text,
+            })
+        .toList();
+    final trimmed = priorHistory.length > 12
+        ? priorHistory.sublist(priorHistory.length - 12)
+        : priorHistory;
+
+    _addMessage(AgentMessage(role: 'user', text: text));
+
+    if (modeService.mode == AppMode.cloud) {
+      await _sendCloud(text, trimmed);
+    } else {
+      _sendLocal(text, trimmed);
+    }
+  }
+
+  Future<void> _sendCloud(
+      String userText, List<Map<String, String>> priorHistory) async {
+    final cfg = await _settings.load();
+    final provider = cfg['provider']!;
+    final apiKey = cfg['apiKey']!;
+    final model = cfg['model']!;
+
+    if (apiKey.isEmpty) {
+      _addMessage(AgentMessage(
+          role: 'error',
+          text: 'No API key set. Open Settings and add a key.'));
+      return;
+    }
+
+    _setState(AgentState.thinking, 'Thinking...');
+    try {
+      final reply = await _callProvider(
+        provider: provider,
+        apiKey: apiKey,
+        model: model,
+        messages: [
+          ...priorHistory,
+          {'role': 'user', 'content': userText},
+        ],
+      );
+      _addMessage(AgentMessage(role: 'agent', text: reply));
+      _setState(AgentState.connected, 'Cloud Mode · ready');
+    } catch (e) {
+      _addMessage(AgentMessage(role: 'error', text: 'AI Error: $e'));
+      _setState(AgentState.connected, 'Cloud Mode · ready');
+    }
+  }
+
+  Future<String> _callProvider({
+    required String provider,
+    required String apiKey,
+    required String model,
+    required List<Map<String, String>> messages,
+  }) async {
+    const system =
+        'You are Omni-IDE, a friendly AI coding assistant running inside an Android IDE. '
+        'You are in Cloud Mode — you do NOT have file system or shell access. '
+        'Write clear, idiomatic code in fenced blocks and keep replies focused.';
+
+    Uri url;
+    Map<String, String> headers;
+    String body;
+
+    if (provider == 'anthropic') {
+      url = Uri.parse('https://api.anthropic.com/v1/messages');
+      headers = {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      };
+      body = jsonEncode({
+        'model': model,
+        'max_tokens': 2048,
+        'system': system,
+        'messages': messages,
+      });
+    } else {
+      // OpenAI / OpenRouter / Custom (OpenAI-compatible)
+      final base = provider == 'openai'
+          ? 'https://api.openai.com/v1'
+          : 'https://openrouter.ai/api/v1';
+      url = Uri.parse('$base/chat/completions');
+      headers = {
+        'Authorization': 'Bearer $apiKey',
+        'Content-Type': 'application/json',
+        if (provider == 'openrouter') 'HTTP-Referer': 'https://omni-ide.app',
+        if (provider == 'openrouter') 'X-Title': 'Omni-IDE',
+      };
+      body = jsonEncode({
+        'model': model,
+        'max_tokens': 2048,
+        'messages': [
+          {'role': 'system', 'content': system},
+          ...messages,
+        ],
+      });
+    }
+
+    final res = await http
+        .post(url, headers: headers, body: body)
+        .timeout(const Duration(seconds: 60));
+    if (res.statusCode != 200) {
+      Map<String, dynamic>? j;
+      try { j = jsonDecode(res.body) as Map<String, dynamic>; } catch (_) {}
+      throw Exception(j?['error']?['message'] ?? 'HTTP ${res.statusCode}');
+    }
+    final j = jsonDecode(res.body) as Map<String, dynamic>;
+    if (provider == 'anthropic') {
+      final content = j['content'] as List?;
+      return (content != null && content.isNotEmpty)
+          ? (content.first['text']?.toString() ?? '')
+          : '';
+    }
+    final choices = j['choices'] as List?;
+    return (choices != null && choices.isNotEmpty)
+        ? (choices.first['message']?['content']?.toString() ?? '')
+        : '';
+  }
+
+  void _sendLocal(String text, List<Map<String, String>> priorHistory) {
+    if (_state != AgentState.connected) return;
+    _send({
+      'type': 'message',
+      'content': text,
+      'history': priorHistory,
+    });
+  }
+
+  // ── Local WS handlers ───────────────────────────────
   void _onMessage(dynamic raw) async {
     final msg = jsonDecode(raw as String);
     final type = msg['type'] as String?;
-
     switch (type) {
       case 'status':
         if (msg['message'] == 'Agent Ready') {
           _retryAttempt = 0;
           _cancelRetry();
-          _setState(AgentState.connected, 'Connected');
+          _setState(AgentState.connected, 'Full Access · connected');
           await _sendConfig();
         }
         break;
@@ -120,20 +288,16 @@ class AgentService extends ChangeNotifier {
         break;
       case 'tool_result':
         _addMessage(AgentMessage(
-          role: 'tool_result',
-          text: msg['result']?.toString() ?? '',
-        ));
+            role: 'tool_result', text: msg['result']?.toString() ?? ''));
         break;
       case 'reply':
-        _setState(AgentState.connected, 'Connected');
+        _setState(AgentState.connected, 'Full Access · connected');
         _addMessage(AgentMessage(role: 'agent', text: msg['message'] ?? ''));
         break;
       case 'error':
-        _setState(AgentState.connected, 'Connected');
+        _setState(AgentState.connected, 'Full Access · connected');
         _addMessage(AgentMessage(
-          role: 'error',
-          text: msg['message'] ?? 'Unknown error',
-        ));
+            role: 'error', text: msg['message'] ?? 'Unknown error'));
         break;
     }
   }
@@ -141,17 +305,20 @@ class AgentService extends ChangeNotifier {
   void _onDisconnected() {
     _sub?.cancel();
     _channel = null;
-    _setState(AgentState.disconnected, 'Disconnected');
-    _scheduleRetry();
+    if (modeService.mode == AppMode.local) {
+      _setState(AgentState.disconnected, 'Disconnected');
+      _scheduleRetry();
+    } else {
+      _enterCloudReady();
+    }
   }
 
-  // ── Retry with backoff ─────────────────────────
   void _scheduleRetry() {
     if (!_autoRetry) return;
+    if (modeService.mode != AppMode.local) return;
     _retryAttempt++;
-    // 3s, 6s, 12s, then capped at 20s
-    final delay = [3, 6, 12, 20][
-        _retryAttempt > 4 ? 3 : _retryAttempt - 1];
+    final delay =
+        [3, 6, 12, 20][_retryAttempt > 4 ? 3 : _retryAttempt - 1];
     _retryCountdown = delay;
     _retryTimer?.cancel();
     _retryTimer = Timer.periodic(const Duration(seconds: 1), (t) {
@@ -182,30 +349,12 @@ class AgentService extends ChangeNotifier {
     });
   }
 
-  // ── Send Message ─────────────────────────────
-  void sendMessage(String text) {
-    if (_state != AgentState.connected) return;
-    if (text.trim().isEmpty) return;
-
-    final history = _messages
-        .where((m) => m.role == 'user' || m.role == 'agent')
-        .map((m) => {
-              'role': m.role == 'agent' ? 'assistant' : 'user',
-              'content': m.text,
-            })
-        .toList();
-
-    _addMessage(AgentMessage(role: 'user', text: text));
-
-    _send({
-      'type': 'message',
-      'content': text,
-      'history':
-          history.length > 12 ? history.sublist(history.length - 12) : history,
-    });
+  void _enterCloudReady() {
+    _cancelRetry();
+    _setState(AgentState.connected, 'Cloud Mode · ready');
   }
 
-  // ── Helpers ──────────────────────────────────
+  // ── Helpers ─────────────────────────────────────────
   void _send(Map<String, dynamic> data) {
     _channel?.sink.add(jsonEncode(data));
   }
@@ -226,10 +375,15 @@ class AgentService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> reloadConfig() => _sendConfig();
+  Future<void> reloadConfig() async {
+    if (modeService.mode == AppMode.local) {
+      await _sendConfig();
+    }
+  }
 
   @override
   void dispose() {
+    modeService.removeListener(_onModeChanged);
     _cancelRetry();
     _sub?.cancel();
     _channel?.sink.close();

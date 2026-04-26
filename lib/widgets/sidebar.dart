@@ -1,6 +1,10 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
+import '../services/app_mode_service.dart';
+import '../services/native_file_service.dart';
 import '../theme/omni_theme.dart';
 
 enum SidebarTab { files, search, agent }
@@ -176,8 +180,14 @@ class _FileExplorerTreeState extends State<FileExplorerTree> {
   bool _loading = true;
   String? _error;
   String? _selected;
+  bool _agentReachable = false;
 
   String get _relPath => _crumbs.join('/');
+  String get _absDir {
+    if (_root == null) return '';
+    if (_crumbs.isEmpty) return _root!.path;
+    return '${_root!.path}/${_crumbs.join('/')}';
+  }
 
   @override
   void initState() {
@@ -185,26 +195,56 @@ class _FileExplorerTreeState extends State<FileExplorerTree> {
     _loadRoots();
   }
 
+  /// Always-available default roots, even when the agent is offline.
+  /// These match the spec exactly:
+  ///   • OmniIDE workspace  → /storage/emulated/0/OmniIDE
+  ///   • Full Device        → /storage/emulated/0
+  ///   • Termux Home        → /data/data/com.termux/files/home
+  List<_Root> _defaultRoots() {
+    final mode = context.read<AppModeService>();
+    final ws = mode.workspacePath;
+    final out = <_Root>[
+      _Root(id: 'omniide',  label: 'OmniIDE',     path: ws),
+      _Root(id: 'sdcard',   label: 'Device',      path: '/storage/emulated/0'),
+    ];
+    // Only show Termux root if it exists.
+    if (Directory('/data/data/com.termux/files/home').existsSync()) {
+      out.add(const _Root(
+          id: 'termux',
+          label: 'Termux Home',
+          path: '/data/data/com.termux/files/home'));
+    }
+    return out;
+  }
+
   Future<void> _loadRoots() async {
+    // Try the agent first; if it's not reachable we silently fall back to
+    // the native explorer with sane defaults — the UX is the same either way.
     try {
       final res = await http
           .get(Uri.parse('$_agent/roots'))
-          .timeout(const Duration(seconds: 5));
+          .timeout(const Duration(seconds: 2));
       final data = jsonDecode(res.body);
       final roots = (data['roots'] as List)
-          .map((r) => _Root(id: r['id'], label: r['label'], path: r['path']))
+          .map((r) => _Root(
+              id: r['id'] as String,
+              label: r['label'] as String,
+              path: r['path'] as String))
           .toList();
       setState(() {
+        _agentReachable = true;
         _roots = roots;
         _root = roots.isNotEmpty ? roots.first : null;
       });
-      if (_root != null) await _load();
     } catch (_) {
+      final defaults = _defaultRoots();
       setState(() {
-        _error = 'Agent unreachable';
-        _loading = false;
+        _agentReachable = false;
+        _roots = defaults;
+        _root = defaults.isNotEmpty ? defaults.first : null;
       });
     }
+    if (_root != null) await _load();
   }
 
   Future<void> _load() async {
@@ -213,63 +253,104 @@ class _FileExplorerTreeState extends State<FileExplorerTree> {
       _loading = true;
       _error = null;
     });
+    if (_agentReachable) {
+      await _loadFromAgent();
+    } else {
+      await _loadFromNative();
+    }
+  }
+
+  Future<void> _loadFromAgent() async {
     try {
       final uri = Uri.parse('$_agent/files').replace(queryParameters: {
         'root': _root!.id,
         if (_relPath.isNotEmpty) 'path': _relPath,
       });
-      final res = await http.get(uri).timeout(const Duration(seconds: 6));
+      final res = await http.get(uri).timeout(const Duration(seconds: 4));
       final data = jsonDecode(res.body);
       if (data['error'] != null) {
-        setState(() {
-          _error = data['error'];
-          _loading = false;
-        });
+        setState(() { _error = data['error']; _loading = false; });
         return;
       }
       final items = (data['items'] as List)
           .map((i) => _FItem(
                 name: i['name'],
                 isDir: i['isDir'],
-                relPath: _relPath.isEmpty ? i['name'] : '$_relPath/${i['name']}',
+                relPath:
+                    _relPath.isEmpty ? i['name'] : '$_relPath/${i['name']}',
               ))
           .toList()
-        ..sort((a, b) {
-          if (a.isDir && !b.isDir) return -1;
-          if (!a.isDir && b.isDir) return 1;
-          return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-        });
-      setState(() {
-        _items = items;
-        _loading = false;
-      });
+        ..sort(_sortItems);
+      setState(() { _items = items; _loading = false; });
     } catch (_) {
+      // Agent died mid-session — flip into native mode and retry.
+      setState(() => _agentReachable = false);
+      await _loadFromNative();
+    }
+  }
+
+  Future<void> _loadFromNative() async {
+    try {
+      final raw = await NativeFileService.listDir(_absDir);
+      final items = raw
+          .map((m) => _FItem(
+                name: m['name'] as String,
+                isDir: m['isDir'] as bool,
+                relPath: _relPath.isEmpty
+                    ? m['name'] as String
+                    : '$_relPath/${m['name']}',
+              ))
+          .toList()
+        ..sort(_sortItems);
+      setState(() { _items = items; _loading = false; _error = null; });
+    } catch (e) {
       setState(() {
-        _error = 'Agent unreachable';
+        _error = 'Cannot read $_absDir — grant storage permission in Settings';
         _loading = false;
       });
     }
   }
 
+  int _sortItems(_FItem a, _FItem b) {
+    if (a.isDir && !b.isDir) return -1;
+    if (!a.isDir && b.isDir) return 1;
+    return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+  }
+
   Future<void> _openFile(_FItem item) async {
     if (_root == null) return;
     setState(() => _selected = item.relPath);
+    if (_agentReachable) {
+      try {
+        final uri = Uri.parse('$_agent/file').replace(queryParameters: {
+          'root': _root!.id,
+          'path': item.relPath,
+        });
+        final res = await http.get(uri).timeout(const Duration(seconds: 4));
+        final data = jsonDecode(res.body);
+        if (data['error'] != null) {
+          _toast(data['error']);
+          return;
+        }
+        widget.onFileOpen(
+            data['absPath'] ?? item.relPath, item.name, data['content']);
+        return;
+      } catch (_) {
+        setState(() => _agentReachable = false);
+      }
+    }
+    // Native fallback
     try {
-      final uri = Uri.parse('$_agent/file').replace(queryParameters: {
-        'root': _root!.id,
-        'path': item.relPath,
-      });
-      final res = await http.get(uri).timeout(const Duration(seconds: 8));
-      final data = jsonDecode(res.body);
-      if (data['error'] != null) {
-        _toast(data['error']);
+      final abs = '${_root!.path}/${item.relPath}';
+      final result = await NativeFileService.readFile(abs);
+      if (result['error'] != null) {
+        _toast(result['error'].toString());
         return;
       }
       widget.onFileOpen(
-        data['absPath'] ?? item.relPath,
-        item.name,
-        data['content'],
-      );
+          result['absPath']?.toString() ?? abs,
+          item.name,
+          result['content']?.toString() ?? '');
     } catch (_) {
       _toast('Failed to open file');
     }
@@ -303,24 +384,42 @@ class _FileExplorerTreeState extends State<FileExplorerTree> {
       hint: isDir ? 'folder name' : 'filename.ext',
     );
     if (name == null || name.trim().isEmpty || _root == null) return;
-    final relPath = _relPath.isEmpty ? name.trim() : '$_relPath/${name.trim()}';
-    try {
-      final body = jsonEncode({'root': _root!.id, 'path': relPath});
-      final res = await http
-          .post(
-            Uri.parse('$_agent/${isDir ? 'mkdir' : 'file'}'),
-            headers: const {'Content-Type': 'application/json'},
-            body: isDir
-                ? body
-                : jsonEncode({'root': _root!.id, 'path': relPath, 'content': ''}),
-          )
-          .timeout(const Duration(seconds: 6));
-      final data = jsonDecode(res.body);
-      if (data['error'] != null) {
-        _toast(data['error']);
-      } else {
-        await _load();
+    final clean = name.trim();
+    final relPath = _relPath.isEmpty ? clean : '$_relPath/$clean';
+
+    if (_agentReachable) {
+      try {
+        final body = jsonEncode({'root': _root!.id, 'path': relPath});
+        final res = await http
+            .post(
+              Uri.parse('$_agent/${isDir ? 'mkdir' : 'file'}'),
+              headers: const {'Content-Type': 'application/json'},
+              body: isDir
+                  ? body
+                  : jsonEncode(
+                      {'root': _root!.id, 'path': relPath, 'content': ''}),
+            )
+            .timeout(const Duration(seconds: 4));
+        final data = jsonDecode(res.body);
+        if (data['error'] != null) {
+          _toast(data['error']);
+        } else {
+          await _load();
+        }
+        return;
+      } catch (_) {
+        setState(() => _agentReachable = false);
       }
+    }
+    // Native fallback
+    try {
+      final abs = '${_root!.path}/$relPath';
+      if (isDir) {
+        await NativeFileService.mkdir(abs);
+      } else {
+        await NativeFileService.writeFile(abs, '');
+      }
+      await _load();
     } catch (_) {
       _toast('Failed to create');
     }
@@ -333,28 +432,41 @@ class _FileExplorerTreeState extends State<FileExplorerTree> {
       hint: 'new name',
       initial: item.name,
     );
-    if (newName == null || newName.trim().isEmpty || newName == item.name) return;
-    final newRel = _relPath.isEmpty
-        ? newName.trim()
-        : '$_relPath/${newName.trim()}';
-    try {
-      final res = await http
-          .post(
-            Uri.parse('$_agent/rename'),
-            headers: const {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'root': _root!.id,
-              'from': item.relPath,
-              'to': newRel,
-            }),
-          )
-          .timeout(const Duration(seconds: 6));
-      final data = jsonDecode(res.body);
-      if (data['error'] != null) {
-        _toast(data['error']);
-      } else {
-        await _load();
+    if (newName == null || newName.trim().isEmpty || newName == item.name) {
+      return;
+    }
+    final newRel =
+        _relPath.isEmpty ? newName.trim() : '$_relPath/${newName.trim()}';
+
+    if (_agentReachable) {
+      try {
+        final res = await http
+            .post(
+              Uri.parse('$_agent/rename'),
+              headers: const {'Content-Type': 'application/json'},
+              body: jsonEncode({
+                'root': _root!.id,
+                'from': item.relPath,
+                'to': newRel,
+              }),
+            )
+            .timeout(const Duration(seconds: 4));
+        final data = jsonDecode(res.body);
+        if (data['error'] != null) {
+          _toast(data['error']);
+        } else {
+          await _load();
+        }
+        return;
+      } catch (_) {
+        setState(() => _agentReachable = false);
       }
+    }
+    try {
+      final from = '${_root!.path}/${item.relPath}';
+      final to = '${_root!.path}/$newRel';
+      await NativeFileService.rename(from, to);
+      await _load();
     } catch (_) {
       _toast('Failed to rename');
     }
@@ -367,20 +479,31 @@ class _FileExplorerTreeState extends State<FileExplorerTree> {
       body: '${item.name} will be permanently removed.',
     );
     if (ok != true) return;
-    try {
-      final res = await http
-          .post(
-            Uri.parse('$_agent/delete'),
-            headers: const {'Content-Type': 'application/json'},
-            body: jsonEncode({'root': _root!.id, 'path': item.relPath}),
-          )
-          .timeout(const Duration(seconds: 6));
-      final data = jsonDecode(res.body);
-      if (data['error'] != null) {
-        _toast(data['error']);
-      } else {
-        await _load();
+
+    if (_agentReachable) {
+      try {
+        final res = await http
+            .post(
+              Uri.parse('$_agent/delete'),
+              headers: const {'Content-Type': 'application/json'},
+              body: jsonEncode({'root': _root!.id, 'path': item.relPath}),
+            )
+            .timeout(const Duration(seconds: 4));
+        final data = jsonDecode(res.body);
+        if (data['error'] != null) {
+          _toast(data['error']);
+        } else {
+          await _load();
+        }
+        return;
+      } catch (_) {
+        setState(() => _agentReachable = false);
       }
+    }
+    try {
+      final abs = '${_root!.path}/${item.relPath}';
+      await NativeFileService.deletePath(abs);
+      await _load();
     } catch (_) {
       _toast('Failed to delete');
     }
@@ -870,7 +993,7 @@ class _ErrorState extends StatelessWidget {
             ),
             const SizedBox(height: T.s_2),
             Text(
-              'Start the agent in Termux',
+              'check storage permission or try a different root',
               style: T.ui(size: 10, color: T.muted),
               textAlign: TextAlign.center,
             ),

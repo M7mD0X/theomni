@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import '../services/settings_service.dart';
 import '../services/agent_service.dart';
+import '../services/app_mode_service.dart';
 import '../theme/omni_theme.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -183,6 +184,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ]),
           ),
           const SizedBox(height: T.s_7),
+
+          // ── Mode (Cloud / Local) ────────────────────
+          _ModeSection(),
+          const SizedBox(height: T.s_6),
 
           // ── Provider ────────────────────────────────
           _Section(
@@ -790,3 +795,208 @@ class _SolidBtnState extends State<_SolidBtn> {
     );
   }
 }
+
+// ─── Mode (Cloud / Local) ──────────────────────────────────────────────
+class _ModeSection extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<AppModeService>(
+      builder: (_, mode, __) {
+        final isLocal = mode.mode == AppMode.local;
+        final termux = mode.termuxInstalled;
+        return _Section(
+          label: 'mode',
+          subtitle: isLocal
+              ? 'full access agent · file & shell tools'
+              : 'cloud mode · chat only · works for everyone',
+          child: Column(
+            children: [
+              // Cloud tile
+              _ModeTile(
+                title: 'Cloud',
+                desc: 'Direct AI · no Termux required',
+                icon: Icons.cloud_outlined,
+                selected: !isLocal,
+                onTap: () => mode.setLocalEnabled(false),
+              ),
+              const SizedBox(height: T.s_2),
+              // Local tile (gated by Termux presence)
+              _ModeTile(
+                title: 'Full Access',
+                desc: termux
+                    ? 'WebSocket · file + shell tools'
+                    : 'Install Termux to enable',
+                icon: termux
+                    ? Icons.terminal_rounded
+                    : Icons.lock_outline_rounded,
+                selected: isLocal,
+                disabled: !termux,
+                onTap: () async {
+                  if (!termux) {
+                    await mode.refreshTermux();
+                    if (!mode.termuxInstalled) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          backgroundColor: T.s2,
+                          behavior: SnackBarBehavior.floating,
+                          content: Text(
+                              'Termux not installed. Install it from F-Droid first.',
+                              style: T.ui(size: 12, color: T.text)),
+                        ),
+                      );
+                      return;
+                    }
+                  }
+                  await mode.setLocalEnabled(true);
+                },
+              ),
+              if (!termux) ...[
+                const SizedBox(height: T.s_3),
+                GestureDetector(
+                  onTap: mode.refreshTermux,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: T.s_3, vertical: T.s_2),
+                    decoration: BoxDecoration(
+                      color: T.s2,
+                      borderRadius: BorderRadius.circular(T.r_md),
+                      border: Border.all(color: T.border, width: 0.8),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.refresh_rounded,
+                            size: 13, color: T.muted),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'I just installed Termux — re-check',
+                            style: T.ui(size: 11, color: T.dim),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+              if (termux && isLocal) ...[
+                const SizedBox(height: T.s_3),
+                GestureDetector(
+                  onTap: mode.openTermux,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: T.s_3, vertical: T.s_2),
+                    decoration: BoxDecoration(
+                      color: T.accentBg,
+                      borderRadius: BorderRadius.circular(T.r_md),
+                      border: Border.all(color: T.accent, width: 0.8),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.open_in_new_rounded,
+                            size: 13, color: T.accent),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'open Termux & run ~/omni-ide/start_agent.sh',
+                            style: T.mono(size: 11, color: T.accent),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ModeTile extends StatefulWidget {
+  final String title;
+  final String desc;
+  final IconData icon;
+  final bool selected;
+  final bool disabled;
+  final VoidCallback onTap;
+  const _ModeTile({
+    required this.title,
+    required this.desc,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+    this.disabled = false,
+  });
+
+  @override
+  State<_ModeTile> createState() => _ModeTileState();
+}
+
+class _ModeTileState extends State<_ModeTile> {
+  bool _hover = false;
+  @override
+  Widget build(BuildContext context) {
+    final sel = widget.selected;
+    return MouseRegion(
+      cursor: widget.disabled
+          ? SystemMouseCursors.forbidden
+          : SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: widget.disabled ? null : widget.onTap,
+        child: AnimatedContainer(
+          duration: T.dFast,
+          padding: const EdgeInsets.symmetric(
+              horizontal: T.s_4, vertical: T.s_3),
+          decoration: BoxDecoration(
+            color: sel
+                ? T.accentBg
+                : (_hover && !widget.disabled ? T.s2 : T.s1),
+            borderRadius: BorderRadius.circular(T.r_md),
+            border: Border.all(
+              color: sel
+                  ? T.accent
+                  : (widget.disabled ? T.border : T.borderHi),
+              width: sel ? 1 : 0.8,
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(widget.icon,
+                  size: 17,
+                  color: sel
+                      ? T.accent
+                      : (widget.disabled ? T.muted : T.dim)),
+              const SizedBox(width: T.s_3),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(widget.title,
+                        style: T.ui(
+                          size: 13,
+                          color: widget.disabled ? T.muted : T.text,
+                          weight: sel
+                              ? FontWeight.w600
+                              : FontWeight.w500,
+                        )),
+                    const SizedBox(height: 2),
+                    Text(widget.desc,
+                        style:
+                            T.ui(size: 11, color: T.muted, height: 1.3)),
+                  ],
+                ),
+              ),
+              if (sel)
+                const Icon(Icons.check_rounded, size: 16, color: T.accent),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+

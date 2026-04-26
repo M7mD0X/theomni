@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+import '../services/app_mode_service.dart';
 import '../theme/omni_theme.dart';
 import '../widgets/top_bar.dart';
 import '../widgets/sidebar.dart';
@@ -54,7 +56,13 @@ class _MainIDEScreenState extends State<MainIDEScreen>
 
   Future<void> _startGuardian() async {
     try {
-      await _guardian.invokeMethod('startGuardian');
+      // Only spawn the agent process when the user has explicitly opted into
+      // Local Mode. In Cloud Mode the foreground service still starts (so the
+      // app is properly user-visible), but no Node process is launched.
+      final modeSvc = context.read<AppModeService>();
+      await _guardian.invokeMethod('startGuardian', {
+        'localMode': modeSvc.mode == AppMode.local,
+      });
       if (mounted) setState(() => _guardianOn = true);
     } catch (_) {}
   }

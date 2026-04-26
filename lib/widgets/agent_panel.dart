@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../services/agent_service.dart';
+import '../services/app_mode_service.dart';
 import '../theme/omni_theme.dart';
 
 class AgentPanel extends StatefulWidget {
@@ -57,15 +58,19 @@ class _AgentPanelState extends State<AgentPanel> {
   @override
   Widget build(BuildContext context) {
     return Consumer<AgentService>(
-      builder: (_, agent, __) => Column(
+      builder: (_, agent, __) {
+        final modeSvc = context.watch<AppModeService>();
+        final isCloud = modeSvc.mode == AppMode.cloud;
+        return Column(
         children: [
-          _StatusStrip(agent: agent),
+          _StatusStrip(agent: agent, cloud: isCloud),
           Expanded(
-            child: agent.state == AgentState.disconnected
+            child: (!isCloud && agent.state == AgentState.disconnected)
                 ? _DisconnectedView(agent: agent)
                 : agent.messages.isEmpty
                     ? _EmptyState(
                         state: agent.state,
+                        cloud: isCloud,
                         onSend: (q) {
                           _input.text = q;
                           _send();
@@ -91,7 +96,8 @@ class _AgentPanelState extends State<AgentPanel> {
             enabled: agent.state == AgentState.connected,
           ),
         ],
-      ),
+      );
+      },
     );
   }
 }
@@ -99,7 +105,8 @@ class _AgentPanelState extends State<AgentPanel> {
 // ── Status strip ─────────────────────────────────────────────────────────
 class _StatusStrip extends StatelessWidget {
   final AgentService agent;
-  const _StatusStrip({required this.agent});
+  final bool cloud;
+  const _StatusStrip({required this.agent, required this.cloud});
 
   @override
   Widget build(BuildContext context) {
@@ -128,18 +135,40 @@ class _StatusStrip extends StatelessWidget {
           ),
           const SizedBox(width: T.s_2),
           Text(agent.statusText, style: T.ui(size: 11, color: T.dim)),
+          const SizedBox(width: 8),
+          // Mode badge
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: cloud ? T.s2 : T.accentBg,
+              borderRadius: BorderRadius.circular(T.r_pill),
+              border: Border.all(
+                color: cloud ? T.border : T.accent,
+                width: 0.8,
+              ),
+            ),
+            child: Text(
+              cloud ? 'Cloud Mode' : 'Full Access Agent',
+              style: T.ui(
+                  size: 9.5,
+                  color: cloud ? T.muted : T.accent,
+                  weight: FontWeight.w700,
+                  letterSpacing: 1),
+            ),
+          ),
           const Spacer(),
-          if (agent.state == AgentState.disconnected)
+          if (!cloud && agent.state == AgentState.disconnected)
             _MiniBtn(
                 label: 'connect',
                 onTap: () =>
                     context.read<AgentService>().connect(fromUser: true)),
           if (connected) ...[
-            _MiniBtn(
-              label: 'sync',
-              onTap: () => context.read<AgentService>().reloadConfig(),
-            ),
-            const SizedBox(width: 6),
+            if (!cloud)
+              _MiniBtn(
+                label: 'sync',
+                onTap: () => context.read<AgentService>().reloadConfig(),
+              ),
+            if (!cloud) const SizedBox(width: 6),
             _MiniBtn(
               label: 'clear',
               onTap: () => context.read<AgentService>().clearMessages(),
@@ -811,10 +840,21 @@ class _ThinkingState extends State<_Thinking>
 // ── Empty state (when connected but no messages yet) ─────────────────────
 class _EmptyState extends StatelessWidget {
   final AgentState state;
+  final bool cloud;
   final Function(String) onSend;
-  const _EmptyState({required this.state, required this.onSend});
+  const _EmptyState({
+    required this.state,
+    required this.onSend,
+    this.cloud = false,
+  });
 
-  static const _prompts = [
+  static const _cloudPrompts = [
+    'explain a python decorator',
+    'write a debounce function in javascript',
+    'sketch a REST api for a todo app',
+    'compare sqlite vs postgres for a mobile app',
+  ];
+  static const _localPrompts = [
     'write a hello world in python',
     'show me all files in the project',
     'create a simple express api',
@@ -847,7 +887,7 @@ class _EmptyState extends StatelessWidget {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: _prompts
+            children: (cloud ? _cloudPrompts : _localPrompts)
                 .map((p) => _Suggestion(text: p, onTap: () => onSend(p)))
                 .toList(),
           ),

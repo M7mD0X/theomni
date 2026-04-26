@@ -8,23 +8,56 @@ const { execSync, spawnSync } = require('child_process');
 const app = express();
 app.use(express.json({ limit: '10mb' }));
 
-const PORT = 8080;
-const HOME = process.env.HOME || '/data/data/com.termux/files/home';
-const PROJECTS = path.join(HOME, 'omni-ide', 'projects');
+const PORT = parseInt(process.env.OMNI_PORT || '8080', 10);
 
-// Ensure baseline dirs exist
-if (!fs.existsSync(PROJECTS)) fs.mkdirSync(PROJECTS, { recursive: true });
+// HOME on Termux defaults to /data/data/com.termux/files/home, but we no longer
+// depend on it being present — Cloud Mode users may run this agent on plain Linux,
+// CI, or even desktop. We also expose the user's primary OmniIDE workspace
+// (/storage/emulated/0/OmniIDE on Android) when it exists.
+const HOME =
+  process.env.HOME ||
+  process.env.USERPROFILE ||
+  process.env.OMNI_HOME ||
+  '/data/data/com.termux/files/home';
+
+const PROJECTS = process.env.OMNI_PROJECTS || path.join(HOME, 'omni-ide', 'projects');
+
+// User-facing workspace (created by the Flutter app on first launch).
+const OMNI_WORKSPACE =
+  process.env.OMNI_WORKSPACE || '/storage/emulated/0/OmniIDE';
+
+// Ensure baseline dirs exist (best-effort — no-op on systems where we can't write).
+try {
+  if (!fs.existsSync(PROJECTS)) fs.mkdirSync(PROJECTS, { recursive: true });
+} catch {}
 
 // ── Roots & safety ──────────────────────────────────────────────────────
 // All filesystem operations must resolve to paths under one of these roots.
-// We keep them broad enough to give the user a "real" file explorer on Android,
-// but never let a request escape outside them.
-const ROOTS = [
+// We only advertise roots that actually exist on this machine, so the same
+// agent code runs on Termux, plain Linux, and CI without exposing fake paths.
+const _candidateRoots = [
+  { id: 'omniide',  label: 'OmniIDE',  path: OMNI_WORKSPACE },
   { id: 'projects', label: 'Projects', path: PROJECTS },
+  { id: 'sdcard',   label: 'Device',   path: '/storage/emulated/0' },
   { id: 'home',     label: 'HOME',     path: HOME },
-  { id: 'sdcard',   label: '/sdcard',  path: '/sdcard' },
-  { id: 'storage',  label: 'storage',  path: path.join(HOME, 'storage') },
+  { id: 'termux',   label: 'Termux',   path: '/data/data/com.termux/files/home' },
+  { id: 'legacy',   label: '/sdcard',  path: '/sdcard' },
 ];
+
+const _seen = new Set();
+const ROOTS = _candidateRoots.filter(r => {
+  try {
+    if (!r.path) return false;
+    const resolved = path.resolve(r.path);
+    if (_seen.has(resolved)) return false;
+    if (!fs.existsSync(resolved)) return false;
+    _seen.add(resolved);
+    return true;
+  } catch { return false; }
+});
+
+// Always have at least one root so the API never returns an empty list.
+if (ROOTS.length === 0) ROOTS.push({ id: 'projects', label: 'Projects', path: PROJECTS });
 
 function isUnder(child, parent) {
   const c = path.resolve(child);
@@ -300,7 +333,7 @@ Available tools:
 Rules:
 - Use tools when the user asks to create/read/edit files or run commands
 - After getting tool results, give a helpful response
-- Workspace path: ${PROJECTS}
+- Workspace path: ${_toolWorkspace()}
 - For normal conversation, just reply normally without JSON`;
 
   const messages = [...history, { role: 'user', content: userMessage }];
@@ -367,22 +400,32 @@ function parseTool(text) {
   }
 }
 
+function _toolWorkspace() {
+  // Prefer the OmniIDE workspace, fall back to the first available root.
+  const omni = ROOTS.find(r => r.id === 'omniide');
+  if (omni) return omni.path;
+  const proj = ROOTS.find(r => r.id === 'projects');
+  if (proj) return proj.path;
+  return ROOTS[0].path;
+}
+
 function executeTool(tool, params) {
+  const WORKSPACE = _toolWorkspace();
   switch (tool) {
     case 'list_files': {
-      const dir = path.join(PROJECTS, params.path || '');
+      const dir = path.join(WORKSPACE, params.path || '');
       if (!fs.existsSync(dir)) return `Directory not found: ${dir}`;
       const files = fs.readdirSync(dir);
       return files.length > 0 ? files.join('\n') : '(empty directory)';
     }
     case 'read_file': {
-      const filePath = path.join(PROJECTS, params.path);
+      const filePath = path.join(WORKSPACE, params.path);
       if (!fs.existsSync(filePath)) return `File not found: ${params.path}`;
       const content = fs.readFileSync(filePath, 'utf8');
       return content.length > 3000 ? content.substring(0, 3000) + '\n...(truncated)' : content;
     }
     case 'write_file': {
-      const filePath = path.join(PROJECTS, params.path);
+      const filePath = path.join(WORKSPACE, params.path);
       const dir = path.dirname(filePath);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(filePath, params.content, 'utf8');
@@ -395,7 +438,7 @@ function executeTool(tool, params) {
       }
       try {
         const output = execSync(params.cmd, {
-          cwd: PROJECTS,
+          cwd: WORKSPACE,
           timeout: 15000,
           encoding: 'utf8',
           env: { ...process.env, PATH: process.env.PATH },
