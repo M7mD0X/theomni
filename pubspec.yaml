@@ -1,0 +1,25 @@
+name: omni_ide
+description: Mobile-native AI Development Environment
+publish_to: "none"
+version: 2.0.0+2
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+  flutter: ">=3.24.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  web_socket_channel: ^2.4.0
+  shared_preferences: ^2.2.3
+  http: ^1.2.1
+  provider: ^6.1.2
+  google_fonts: ^6.2.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

@@ -1,0 +1,383 @@
+# =============================================================================
+#  Omni-IDE — Advanced Android Build Pipeline
+# -----------------------------------------------------------------------------
+#  - Real Gradle build (no `flutter create temp_app` hacks)
+#  - Aggressive caching: pub + gradle + flutter sdk
+#  - Static analysis (dart analyze) + unit tests (flutter test)
+#  - Parallel matrix: debug + release APKs (split-per-ABI + universal)
+#  - Optional release signing via repo secrets (falls back to debug-signed)
+#  - Auto-bumps versionCode from run number
+#  - Builds AAB on tagged releases
+#  - Auto-creates GitHub Release with APKs + AAB on `v*.*.*` tags
+#  - APK size summary in the job summary
+#  - Concurrency guard (cancels stale runs on the same ref)
+# =============================================================================
+
+name: Omni-IDE • Build
+
+on:
+  push:
+    branches: [main, dev]
+    tags:    ["v*.*.*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: "Which variants to build"
+        required: true
+        default: "all"
+        type: choice
+        options: [debug, release, all]
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JAVA_VERSION: "17"
+  JAVA_DISTRIBUTION: "zulu"
+  FLUTTER_CHANNEL: "stable"
+  GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.parallel=true -Dorg.gradle.caching=true"
+
+permissions:
+  contents: write       # needed to create releases
+  pull-requests: write  # for PR build comments
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Static analysis + unit tests — fast feedback, blocks the build if broken
+  # ---------------------------------------------------------------------------
+  analyze:
+    name: Analyze & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+          cache-key: "flutter-${{ runner.os }}-stable"
+          pub-cache-key: "pub-${{ runner.os }}-${{ hashFiles('pubspec.yaml') }}"
+
+      - name: Show toolchain
+        run: |
+          flutter --version
+          dart --version
+          java -version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Format check (non-blocking)
+        continue-on-error: true
+        run: dart format --output=none lib/ test/
+
+      - name: Static analysis (warnings allowed)
+        continue-on-error: true
+        run: flutter analyze --no-fatal-warnings --no-fatal-infos
+
+      - name: Run unit tests
+        run: flutter test --no-pub --reporter=expanded
+
+  # ---------------------------------------------------------------------------
+  # 2. Compute build metadata — version, build number, release flag
+  # ---------------------------------------------------------------------------
+  metadata:
+    name: Compute metadata
+    runs-on: ubuntu-latest
+    needs: analyze
+    outputs:
+      version_name: ${{ steps.v.outputs.version_name }}
+      version_code: ${{ steps.v.outputs.version_code }}
+      is_release_tag: ${{ steps.v.outputs.is_release_tag }}
+      build_debug: ${{ steps.v.outputs.build_debug }}
+      build_release: ${{ steps.v.outputs.build_release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version + variants
+        id: v
+        shell: bash
+        run: |
+          set -euo pipefail
+          PUB_VERSION=$(grep -E '^version:' pubspec.yaml | sed -E 's/version:\s*//; s/\s+#.*//' | tr -d ' ')
+          PUB_NAME="${PUB_VERSION%%+*}"
+          PUB_CODE="${PUB_VERSION##*+}"
+
+          IS_TAG="false"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            IS_TAG="true"
+            # tag wins over pubspec for versionName
+            PUB_NAME="${GITHUB_REF#refs/tags/v}"
+          fi
+
+          # versionCode: prefer pubspec build number, but always at least the run number
+          # so artifacts uploaded to Play store are monotonically increasing.
+          if [[ "${GITHUB_RUN_NUMBER}" -gt "${PUB_CODE}" ]]; then
+            PUB_CODE="${GITHUB_RUN_NUMBER}"
+          fi
+
+          # Decide variants
+          BUILD_DEBUG="true"
+          BUILD_RELEASE="true"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            case "${{ github.event.inputs.build_type }}" in
+              debug)   BUILD_RELEASE="false" ;;
+              release) BUILD_DEBUG="false"   ;;
+            esac
+          fi
+
+          echo "version_name=${PUB_NAME}"   >> "$GITHUB_OUTPUT"
+          echo "version_code=${PUB_CODE}"   >> "$GITHUB_OUTPUT"
+          echo "is_release_tag=${IS_TAG}"   >> "$GITHUB_OUTPUT"
+          echo "build_debug=${BUILD_DEBUG}" >> "$GITHUB_OUTPUT"
+          echo "build_release=${BUILD_RELEASE}" >> "$GITHUB_OUTPUT"
+
+          echo "## Build Metadata" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| versionName | \`${PUB_NAME}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| versionCode | \`${PUB_CODE}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Release tag | \`${IS_TAG}\` |"   >> "$GITHUB_STEP_SUMMARY"
+          echo "| Debug build | \`${BUILD_DEBUG}\` |"   >> "$GITHUB_STEP_SUMMARY"
+          echo "| Release build | \`${BUILD_RELEASE}\` |" >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # 3. Build matrix — debug & release in parallel
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build ${{ matrix.variant }} APK
+    runs-on: ubuntu-latest
+    needs: metadata
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [debug, release]
+    steps:
+      - name: Skip variant if disabled
+        id: gate
+        shell: bash
+        run: |
+          if [[ "${{ matrix.variant }}" == "debug"   && "${{ needs.metadata.outputs.build_debug }}"   != "true" ]] \
+          || [[ "${{ matrix.variant }}" == "release" && "${{ needs.metadata.outputs.build_release }}" != "true" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup JDK
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Setup Flutter
+        if: steps.gate.outputs.skip != 'true'
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+          cache-key: "flutter-${{ runner.os }}-stable"
+          pub-cache-key: "pub-${{ runner.os }}-${{ hashFiles('pubspec.yaml') }}"
+
+      - name: Cache Gradle
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            android/.gradle
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Validate Gradle wrapper
+        if: steps.gate.outputs.skip != 'true'
+        uses: gradle/actions/wrapper-validation@v4
+
+      - name: Override pubspec version
+        if: steps.gate.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -e
+          NAME='${{ needs.metadata.outputs.version_name }}'
+          CODE='${{ needs.metadata.outputs.version_code }}'
+          sed -i -E "s/^version:.*/version: ${NAME}+${CODE}/" pubspec.yaml
+          echo "Pubspec version pinned to ${NAME}+${CODE}"
+          grep '^version:' pubspec.yaml
+
+      - name: flutter pub get
+        if: steps.gate.outputs.skip != 'true'
+        run: flutter pub get
+
+      - name: Decode signing keystore (release only)
+        if: steps.gate.outputs.skip != 'true' && matrix.variant == 'release' && env.ANDROID_KEYSTORE_BASE64 != ''
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -e
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/upload.jks"
+          cat > key.properties <<EOF
+          storeFile=$RUNNER_TEMP/upload.jks
+          storePassword=$ANDROID_KEYSTORE_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          keyPassword=$ANDROID_KEY_PASSWORD
+          EOF
+          echo "Release signing configured"
+
+      - name: Build APK (${{ matrix.variant }})
+        if: steps.gate.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -e
+          flutter build apk --${{ matrix.variant }} \
+            --build-name='${{ needs.metadata.outputs.version_name }}' \
+            --build-number='${{ needs.metadata.outputs.version_code }}' \
+            --split-per-abi
+          # universal APK as well
+          flutter build apk --${{ matrix.variant }} \
+            --build-name='${{ needs.metadata.outputs.version_name }}' \
+            --build-number='${{ needs.metadata.outputs.version_code }}'
+
+      - name: Build AAB (release only, on tag)
+        if: steps.gate.outputs.skip != 'true' && matrix.variant == 'release' && needs.metadata.outputs.is_release_tag == 'true'
+        run: |
+          flutter build appbundle --release \
+            --build-name='${{ needs.metadata.outputs.version_name }}' \
+            --build-number='${{ needs.metadata.outputs.version_code }}'
+
+      - name: Stage artifacts
+        if: steps.gate.outputs.skip != 'true'
+        id: stage
+        shell: bash
+        run: |
+          set -e
+          OUT="dist/${{ matrix.variant }}"
+          mkdir -p "$OUT"
+          VN='${{ needs.metadata.outputs.version_name }}'
+          VC='${{ needs.metadata.outputs.version_code }}'
+
+          shopt -s nullglob
+          for f in build/app/outputs/flutter-apk/app-*-${{ matrix.variant }}.apk \
+                   build/app/outputs/flutter-apk/app-${{ matrix.variant }}.apk; do
+            base=$(basename "$f")
+            # rename to OmniIDE-<version>-<arch>-<variant>.apk
+            arch=$(echo "$base" | sed -E "s/app-(.*)-${{ matrix.variant }}\.apk/\1/; s/^app-${{ matrix.variant }}\.apk$/universal/")
+            cp "$f" "$OUT/OmniIDE-v${VN}+${VC}-${arch}-${{ matrix.variant }}.apk"
+          done
+
+          # AAB is only built on tag pushes (release variant). Copy only if present.
+          AAB="build/app/outputs/bundle/${{ matrix.variant }}/app-${{ matrix.variant }}.aab"
+          if [ -f "$AAB" ]; then
+            cp "$AAB" "$OUT/OmniIDE-v${VN}+${VC}-${{ matrix.variant }}.aab"
+          else
+            echo "No AAB to stage (expected when not building on a tag)."
+          fi
+
+          ls -lh "$OUT"
+          echo "out=$OUT" >> "$GITHUB_OUTPUT"
+
+      - name: APK size report
+        if: steps.gate.outputs.skip != 'true'
+        shell: bash
+        run: |
+          {
+            echo "## ${{ matrix.variant }} build artifacts"
+            echo
+            echo "| File | Size |"
+            echo "|------|------|"
+            for f in ${{ steps.stage.outputs.out }}/*; do
+              SZ=$(du -h "$f" | cut -f1)
+              echo "| \`$(basename "$f")\` | $SZ |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload artifact
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: omni-ide-${{ matrix.variant }}-v${{ needs.metadata.outputs.version_name }}+${{ needs.metadata.outputs.version_code }}
+          path: ${{ steps.stage.outputs.out }}/*
+          retention-days: 14
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # 4. Auto-create GitHub Release on `v*.*.*` tag pushes
+  # ---------------------------------------------------------------------------
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: [metadata, build]
+    if: needs.metadata.outputs.is_release_tag == 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifact tree
+        run: |
+          mkdir -p release-files
+          find artifacts -type f \( -name "*.apk" -o -name "*.aab" \) -exec cp {} release-files/ \;
+          ls -lh release-files
+
+      - name: Generate changelog
+        id: changelog
+        shell: bash
+        run: |
+          set -e
+          PREV_TAG=$(git tag --sort=-v:refname | grep -v "^${GITHUB_REF#refs/tags/}$" | head -n1 || true)
+          {
+            echo "## Omni-IDE v${{ needs.metadata.outputs.version_name }} (build ${{ needs.metadata.outputs.version_code }})"
+            echo
+            if [[ -n "$PREV_TAG" ]]; then
+              echo "### Changes since \`$PREV_TAG\`"
+              echo
+              git log --pretty=format:"- %s (%h)" "$PREV_TAG..HEAD" | head -n 200
+            else
+              echo "### Initial release"
+              git log --pretty=format:"- %s (%h)" | head -n 50
+            fi
+          } > RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Omni-IDE v${{ needs.metadata.outputs.version_name }}"
+          body_path: RELEASE_NOTES.md
+          files: release-files/*
+          draft: false
+          prerelease: ${{ contains(needs.metadata.outputs.version_name, '-') }}
+          fail_on_unmatched_files: true

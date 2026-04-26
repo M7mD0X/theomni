@@ -1,0 +1,66 @@
+# ============================================================================
+#  Nightly canary build — runs every night, builds against Flutter `master`
+#  to surface breaking SDK changes before they reach our `stable` channel.
+#  Failure here is *informational only* and does NOT block PRs.
+# ============================================================================
+
+name: Omni-IDE • Nightly Canary
+
+on:
+  schedule:
+    - cron: "0 4 * * *"   # 04:00 UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: nightly-${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  canary:
+    name: Build against Flutter master
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: master
+          cache: true
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v4
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-canary-${{ hashFiles('android/**/*.gradle*') }}
+          restore-keys: gradle-canary-
+
+      - run: flutter --version
+      - run: flutter pub get
+      - run: flutter analyze --no-fatal-warnings --no-fatal-infos
+        continue-on-error: true
+      - run: flutter test --no-pub
+        continue-on-error: true
+      - run: flutter build apk --debug
+
+      - name: Upload canary APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: omni-ide-canary-${{ github.run_number }}
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          retention-days: 3

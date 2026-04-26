@@ -1,0 +1,83 @@
+# ============================================================================
+#  Tag helper — bumps pubspec.yaml version + creates a `v*.*.*` git tag.
+#  Trigger manually from the Actions tab. After it pushes the tag, the main
+#  build workflow runs automatically and produces a GitHub Release.
+# ============================================================================
+
+name: Omni-IDE • Bump version & Tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Semver part to bump"
+        required: true
+        default: "patch"
+        type: choice
+        options: [major, minor, patch]
+      prerelease:
+        description: "Prerelease suffix (e.g. rc.1) — leave empty for stable"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bump version
+        id: bump
+        shell: bash
+        run: |
+          set -euo pipefail
+          CURRENT=$(grep -E '^version:' pubspec.yaml | sed -E 's/version:\s*//; s/\s+#.*//' | tr -d ' ')
+          NAME="${CURRENT%%+*}"
+          CODE="${CURRENT##*+}"
+          # strip any prerelease suffix from NAME for math
+          BASE="${NAME%%-*}"
+          IFS='.' read -r MA MI PA <<<"$BASE"
+
+          case "${{ inputs.bump }}" in
+            major) MA=$((MA+1)); MI=0; PA=0 ;;
+            minor) MI=$((MI+1)); PA=0 ;;
+            patch) PA=$((PA+1)) ;;
+          esac
+          NEW="${MA}.${MI}.${PA}"
+          if [[ -n "${{ inputs.prerelease }}" ]]; then
+            NEW="${NEW}-${{ inputs.prerelease }}"
+          fi
+          NEW_CODE=$((CODE+1))
+          sed -i -E "s/^version:.*/version: ${NEW}+${NEW_CODE}/" pubspec.yaml
+
+          echo "old=${CURRENT}"        >> "$GITHUB_OUTPUT"
+          echo "new=${NEW}+${NEW_CODE}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${NEW}"            >> "$GITHUB_OUTPUT"
+
+      - name: Commit & tag
+        shell: bash
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pubspec.yaml
+          git commit -m "chore(release): bump ${{ steps.bump.outputs.old }} → ${{ steps.bump.outputs.new }}"
+          git tag -a "${{ steps.bump.outputs.tag }}" -m "Release ${{ steps.bump.outputs.tag }}"
+          git push origin HEAD
+          git push origin "${{ steps.bump.outputs.tag }}"
+
+      - name: Summary
+        run: |
+          {
+            echo "## Version bumped"
+            echo "- Old: \`${{ steps.bump.outputs.old }}\`"
+            echo "- New: \`${{ steps.bump.outputs.new }}\`"
+            echo "- Tag: \`${{ steps.bump.outputs.tag }}\` pushed"
+            echo ""
+            echo "→ The main build workflow will now run and publish a GitHub Release."
+          } >> "$GITHUB_STEP_SUMMARY"

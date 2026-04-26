@@ -1,0 +1,4 @@
+# Example local Android SDK / Flutter SDK paths.
+# Copy this file to `local.properties` (gitignored) and edit.
+sdk.dir=/Users/you/Library/Android/sdk
+flutter.sdk=/Users/you/development/flutter

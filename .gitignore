@@ -1,0 +1,58 @@
+# ===== Dart / Flutter =====
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.metadata
+pubspec.lock
+
+# ===== Android =====
+android/.gradle/
+android/captures/
+android/local.properties
+android/key.properties
+android/**/GeneratedPluginRegistrant.*
+android/app/release/
+android/app/debug/
+android/app/profile/
+*.jks
+*.keystore
+!android/gradle/wrapper/gradle-wrapper.jar
+
+# ===== iOS / macOS (future) =====
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+
+# ===== IDE =====
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+
+# ===== Node =====
+agent/node_modules/
+agent/npm-debug.log
+node_modules/
+
+# ===== Build artifacts =====
+*.apk
+*.aab
+*.dSYM.zip
+*.dSYM
+
+# ===== Signing secrets =====
+key.properties
+upload-keystore.jks
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+
+# ===== Coverage =====
+coverage/

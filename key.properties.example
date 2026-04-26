@@ -1,0 +1,18 @@
+# ------------------------------------------------------------------
+# Example signing configuration for RELEASE builds.
+#
+# Copy this file to `key.properties` and fill in real values, OR
+# let CI generate it automatically from GitHub Actions secrets:
+#   ANDROID_KEYSTORE_BASE64
+#   ANDROID_KEYSTORE_PASSWORD
+#   ANDROID_KEY_ALIAS
+#   ANDROID_KEY_PASSWORD
+#
+# Generate a keystore with:
+#   keytool -genkey -v -keystore upload-keystore.jks \
+#     -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+# ------------------------------------------------------------------
+storeFile=/absolute/path/to/upload-keystore.jks
+storePassword=changeit
+keyAlias=upload
+keyPassword=changeit
