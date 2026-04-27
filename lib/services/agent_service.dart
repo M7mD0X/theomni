@@ -47,6 +47,10 @@ class AgentService extends ChangeNotifier {
 
   AppMode get mode => modeService.mode;
 
+  // Streaming buffer for live token reveal
+  String _streamingBuffer = '';
+  int? _streamingMsgIndex;
+
   // Local-mode WebSocket
   WebSocketChannel? _channel;
   StreamSubscription? _sub;
@@ -265,7 +269,8 @@ class AgentService extends ChangeNotifier {
     final type = msg['type'] as String?;
     switch (type) {
       case 'status':
-        if (msg['message'] == 'Agent Ready') {
+        final m = (msg['message'] ?? '').toString();
+        if (m.startsWith('Agent Ready')) {
           _retryAttempt = 0;
           _cancelRetry();
           _setState(AgentState.connected, 'Full Access · connected');
@@ -277,9 +282,31 @@ class AgentService extends ChangeNotifier {
         break;
       case 'thinking':
         _setState(AgentState.thinking, 'Thinking...');
+        _streamingBuffer = '';
+        _streamingMsgIndex = null;
+        break;
+      case 'token':
+        // Streaming token from the AI provider — append to a live "agent" bubble.
+        final t = msg['token']?.toString() ?? '';
+        if (t.isEmpty) break;
+        _streamingBuffer += t;
+        if (_streamingMsgIndex == null) {
+          _messages.add(AgentMessage(role: 'agent', text: _streamingBuffer));
+          _streamingMsgIndex = _messages.length - 1;
+        } else {
+          _messages[_streamingMsgIndex!] =
+              AgentMessage(role: 'agent', text: _streamingBuffer);
+        }
+        notifyListeners();
         break;
       case 'tool_call':
-        _setState(AgentState.thinking, 'Using tool...');
+        // A tool call ends streaming — drop the in-progress agent bubble (it was JSON).
+        if (_streamingMsgIndex != null) {
+          _messages.removeAt(_streamingMsgIndex!);
+          _streamingMsgIndex = null;
+          _streamingBuffer = '';
+        }
+        _setState(AgentState.thinking, 'Using tool…');
         _addMessage(AgentMessage(
           role: 'tool_call',
           text: msg['tool'] ?? '',
@@ -290,9 +317,35 @@ class AgentService extends ChangeNotifier {
         _addMessage(AgentMessage(
             role: 'tool_result', text: msg['result']?.toString() ?? ''));
         break;
+      case 'shell_chunk':
+        // Live stdout from run_shell — surface as an incremental tool-result line.
+        final chunk = msg['chunk']?.toString() ?? '';
+        if (chunk.isEmpty) break;
+        if (_messages.isNotEmpty && _messages.last.role == 'tool_result') {
+          final last = _messages.last;
+          _messages[_messages.length - 1] =
+              AgentMessage(role: 'tool_result', text: last.text + chunk);
+          notifyListeners();
+        } else {
+          _addMessage(AgentMessage(role: 'tool_result', text: chunk));
+        }
+        break;
       case 'reply':
         _setState(AgentState.connected, 'Full Access · connected');
-        _addMessage(AgentMessage(role: 'agent', text: msg['message'] ?? ''));
+        // If we already streamed the same content into a live bubble, just finalise it.
+        final replyText = (msg['message'] ?? '').toString();
+        if (_streamingMsgIndex != null && _streamingBuffer == replyText) {
+          _streamingMsgIndex = null;
+          _streamingBuffer = '';
+          notifyListeners();
+        } else {
+          if (_streamingMsgIndex != null) {
+            _messages.removeAt(_streamingMsgIndex!);
+            _streamingMsgIndex = null;
+            _streamingBuffer = '';
+          }
+          _addMessage(AgentMessage(role: 'agent', text: replyText));
+        }
         break;
       case 'error':
         _setState(AgentState.connected, 'Full Access · connected');

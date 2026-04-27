@@ -20,7 +20,7 @@
 - [x] Tools: list_files / read_file / write_file / run_shell
 - [x] Real file explorer (HTTP REST) and editor tabs
 
-## Phase 4 — UI/UX Full Overhaul [✅ This session]
+## Phase 4 — UI/UX Full Overhaul [✅ Complete but Still need improvements]
 - [x] New "Editorial Terminal" design system
   - Warm near-black canvas (#0B0A08), cream typography (#F2ECDE)
   - Single marigold accent (#FFB347), no rainbow gradients
@@ -38,18 +38,34 @@
 - [x] All interactions: hover, pressed, focused states with T.dFast (140ms) transitions on specific properties
 
 ## Next Phases
-### Phase 5 — Better AI Agent (planned)
-- Streaming responses (token-by-token reveal)
-- Richer tool set: grep_in_files, patch_file (diff-based edits), run_shell with live stdout, git_* tools
-- Response caching + retry with backoff
-- Proper system prompt with project context awareness
-- Tool call visualisation with expandable diff views
+### Phase 5 — Real Agent [✅ Complete]
+- [x] Streaming token-by-token reveal (SSE) for OpenRouter / OpenAI / Anthropic
+- [x] Rich tool registry: `list_files`, `read_file`, `write_file`, `patch_file`,
+      `mkdir`, `delete_path`, `find_files`, `grep_in_files`, `run_shell` (live stdout),
+      `git_status`, `git_diff`, `git_log`, `git_commit`, `project_info`
+- [x] `run_shell` streams live stdout/stderr back to the UI as `shell_chunk` events
+      (with 30 s timeout + 64 KB cap)
+- [x] Project-aware system prompt — auto-detects stack (Flutter/Node/Python/Rust/Go/Android)
+      and injects a 2-level workspace tree sample
+- [x] Retry with exponential backoff on transient HTTP failures (5xx / 429 / ECONNRESET)
+- [x] In-memory response cache keyed by hash(system + messages + provider/model)
+- [x] Cancel support via `{"type":"cancel"}` WebSocket frame
+- [x] Robust tool-call parser — accepts plain JSON, ```json fences, and embedded JSON blocks
+- [x] Iteration limit raised to 12 with structured Thought→Tool→Observation loop
+- [x] Flutter `AgentService` upgraded to render streaming tokens, live shell chunks,
+      and finalised replies without duplicate bubbles
 
-### Phase 6 — Real File Explorer (planned)
-- Browse any directory (not just `~/omni-ide/projects`)
-- File create / rename / delete / move from Flutter
-- Drag-to-reorder
-- File search (global grep)
+### Phase 5b — Sidebar overlay [✅ Complete]
+- [x] Sidebar now floats over the editor (Stack + slide animation + scrim) instead
+      of pushing the editor canvas — fixes editor overflow on narrow screens
+
+### Phase 5c — Build artefact API [✅ Complete]
+- [x] FastAPI backend at `/api/download` serves a marigold "Editorial Terminal" download page
+- [x] `/api/download/zip` streams `omni-ide.zip` (Flutter app + Android + agent + scripts + workflows)
+- [x] `/api/manifest` returns the bundled-file inventory as JSON
+- [x] Public preview URL: `https://048efec3-e15d-4f14-9823-7e7e99fcccb6.preview.emergentagent.com/api/download`
+
+### Phase 6 — Real File Explorer [✅ Complete]
 
 ### Phase 7 — Real Terminal
 - Flutter ↔ Termux shell via WebSocket

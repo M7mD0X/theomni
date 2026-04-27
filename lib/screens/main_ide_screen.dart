@@ -21,7 +21,7 @@ class _MainIDEScreenState extends State<MainIDEScreen>
     with TickerProviderStateMixin {
   static const _guardian = MethodChannel('com.omniide/guardian');
 
-  bool _sidebarOpen = true;
+  bool _sidebarOpen = false;
   bool _guardianOn = false;
   int _bottomTab = 1; // 0 = terminal, 1 = agent
   double _splitFraction = 0.58; // editor takes this share, agent panel rest
@@ -38,7 +38,7 @@ class _MainIDEScreenState extends State<MainIDEScreen>
     _sidebarCtrl = AnimationController(
       vsync: this,
       duration: T.dMed,
-      value: 1.0,
+      value: 0.0,
     );
     _entryCtrl = AnimationController(
       vsync: this,
@@ -100,7 +100,12 @@ class _MainIDEScreenState extends State<MainIDEScreen>
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.of(context).size.width;
-    final isWide = width >= 720;
+    // Sidebar should overlay (not push) on phones AND tablets — keeps the editor
+    // canvas full-width at all times. On very wide desktops we still overlay,
+    // matching the user's request "sidebar shows over the editor".
+    const double sidebarWidth = 296; // 48 rail + 248 content
+    final overlayWidth =
+        width < sidebarWidth + 80 ? width * 0.86 : sidebarWidth.toDouble();
 
     return Scaffold(
       backgroundColor: T.bg,
@@ -133,65 +138,85 @@ class _MainIDEScreenState extends State<MainIDEScreen>
           builder: (ctx, c) {
             final totalH = c.maxHeight;
             final editorH = totalH * _splitFraction;
-            return Column(
+            return Stack(
               children: [
-                // ── Editor + Sidebar row ────────────────────────────────
-                SizedBox(
-                  height: editorH,
-                  child: Row(
-                    children: [
-                      if (isWide)
-                        SizeTransition(
-                          sizeFactor: CurvedAnimation(
-                            parent: _sidebarCtrl,
-                            curve: T.eOut,
-                          ),
-                          axis: Axis.horizontal,
-                          child: SidebarWidget(onFileOpen: _openFile),
-                        )
-                      else if (_sidebarOpen)
-                        SidebarWidget(onFileOpen: _openFile),
-                      Expanded(
-                        child: EditorView(
-                          files: _files,
-                          activeIndex: _activeFile,
-                          onTabTap: (i) => setState(() => _activeFile = i),
-                          onTabClose: _closeFile,
-                        ),
+                // ── Editor + bottom-panel column (full width, never pushed) ─
+                Column(
+                  children: [
+                    SizedBox(
+                      height: editorH,
+                      child: EditorView(
+                        files: _files,
+                        activeIndex: _activeFile,
+                        onTabTap: (i) => setState(() => _activeFile = i),
+                        onTabClose: _closeFile,
                       ),
-                    ],
+                    ),
+                    _SplitHandle(
+                      onDrag: (dy) {
+                        setState(() {
+                          _splitFraction =
+                              (_splitFraction + dy / totalH).clamp(0.22, 0.82);
+                        });
+                      },
+                    ),
+                    Expanded(
+                      child: Column(
+                        children: [
+                          _PanelTabBar(
+                            selected: _bottomTab,
+                            onTap: (i) => setState(() => _bottomTab = i),
+                          ),
+                          Container(height: 1, color: T.border),
+                          Expanded(
+                            child: AnimatedSwitcher(
+                              duration: T.dMed,
+                              switchInCurve: T.eOut,
+                              child: _bottomTab == 0
+                                  ? const TerminalPanel(key: ValueKey('t'))
+                                  : const AgentPanel(key: ValueKey('a')),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+
+                // ── Scrim behind the floating sidebar ─────────────────────
+                IgnorePointer(
+                  ignoring: !_sidebarOpen,
+                  child: AnimatedBuilder(
+                    animation: _sidebarCtrl,
+                    builder: (_, __) => GestureDetector(
+                      onTap: _toggleSidebar,
+                      child: Container(
+                        color: Colors.black
+                            .withOpacity(0.42 * _sidebarCtrl.value),
+                      ),
+                    ),
                   ),
                 ),
 
-                // ── Draggable split handle ──────────────────────────────
-                _SplitHandle(
-                  onDrag: (dy) {
-                    setState(() {
-                      _splitFraction =
-                          (_splitFraction + dy / totalH).clamp(0.22, 0.82);
-                    });
+                // ── Sliding sidebar overlay ────────────────────────────────
+                AnimatedBuilder(
+                  animation: _sidebarCtrl,
+                  builder: (_, child) {
+                    final t = Curves.easeOutCubic.transform(_sidebarCtrl.value);
+                    return Transform.translate(
+                      offset: Offset(-overlayWidth * (1 - t), 0),
+                      child: child,
+                    );
                   },
-                ),
-
-                // ── Bottom panel ────────────────────────────────────────
-                Expanded(
-                  child: Column(
-                    children: [
-                      _PanelTabBar(
-                        selected: _bottomTab,
-                        onTap: (i) => setState(() => _bottomTab = i),
-                      ),
-                      Container(height: 1, color: T.border),
-                      Expanded(
-                        child: AnimatedSwitcher(
-                          duration: T.dMed,
-                          switchInCurve: T.eOut,
-                          child: _bottomTab == 0
-                              ? const TerminalPanel(key: ValueKey('t'))
-                              : const AgentPanel(key: ValueKey('a')),
-                        ),
-                      ),
-                    ],
+                  child: SizedBox(
+                    width: overlayWidth,
+                    height: totalH,
+                    child: Material(
+                      elevation: 14,
+                      color: T.s1,
+                      shadowColor: Colors.black.withOpacity(0.6),
+                      child: SidebarWidget(onFileOpen: _openFile),
+                    ),
                   ),
                 ),
               ],
