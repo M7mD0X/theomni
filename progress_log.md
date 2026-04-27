@@ -20,7 +20,7 @@
 - [x] Tools: list_files / read_file / write_file / run_shell
 - [x] Real file explorer (HTTP REST) and editor tabs
 
-## Phase 4 — UI/UX Full Overhaul [✅ This session]
+## Phase 4 — UI/UX Full Overhaul [✅ Complete but Still need improvements]
 - [x] New "Editorial Terminal" design system
   - Warm near-black canvas (#0B0A08), cream typography (#F2ECDE)
   - Single marigold accent (#FFB347), no rainbow gradients
@@ -40,16 +40,12 @@
 ## Next Phases
 ### Phase 5 — Better AI Agent (planned)
 - Streaming responses (token-by-token reveal)
-- Richer tool set: grep_in_files, patch_file (diff-based edits), run_shell with live stdout, git_* tools
+- Richer tool set: grep_in_files, patch_file (diff-based edits), run_shell with live stdout, git_* tools, and much more
 - Response caching + retry with backoff
 - Proper system prompt with project context awareness
 - Tool call visualisation with expandable diff views
 
-### Phase 6 — Real File Explorer (planned)
-- Browse any directory (not just `~/omni-ide/projects`)
-- File create / rename / delete / move from Flutter
-- Drag-to-reorder
-- File search (global grep)
+### Phase 6 — Real File Explorer [✅ Complete]
 
 ### Phase 7 — Real Terminal
 - Flutter ↔ Termux shell via WebSocket
