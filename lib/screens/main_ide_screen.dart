@@ -146,11 +146,11 @@ class _MainIDEScreenState extends State<MainIDEScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('cancel', style: T.ui(size: 12, color: T.muted)),
+            child: Text('cancel', style: T.ui(size: 12, color: T.muted)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('discard', style: T.ui(size: 12, color: T.coral, weight: FontWeight.w600)),
+            child: Text('discard', style: T.ui(size: 12, color: T.coral, weight: FontWeight.w600)),
           ),
         ],
       ),
