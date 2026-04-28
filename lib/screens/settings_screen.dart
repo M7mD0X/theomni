@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
@@ -70,10 +71,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _loadingModels = false);
   }
 
+  /// Validate API key format before testing.
+  String? _validateKey() {
+    final key = _keyCtrl.text.trim();
+    if (key.isEmpty) return 'Enter an API key first';
+    if (key.contains(' ')) return 'Key must not contain spaces';
+
+    switch (_provider) {
+      case 'openrouter':
+        if (!key.startsWith('sk-or-')) {
+          return 'OpenRouter keys start with sk-or-';
+        }
+        if (key.length < 20) return 'Key looks too short';
+        return null;
+      case 'anthropic':
+        if (!key.startsWith('sk-ant-')) {
+          return 'Anthropic keys start with sk-ant-';
+        }
+        if (key.length < 20) return 'Key looks too short';
+        return null;
+      case 'openai':
+        if (!key.startsWith('sk-')) {
+          return 'OpenAI keys start with sk-';
+        }
+        if (key.length < 20) return 'Key looks too short';
+        return null;
+      case 'custom':
+        if (key.length < 8) return 'Key is too short for a custom endpoint';
+        return null;
+    }
+    return null;
+  }
+
   Future<void> _test() async {
-    if (_keyCtrl.text.isEmpty) {
+    // Format validation first
+    final validationError = _validateKey();
+    if (validationError != null) {
       setState(() {
-        _testMsg = 'Enter an API key first';
+        _testMsg = validationError;
         _ok = false;
       });
       return;
@@ -92,12 +127,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       final headers = isAnthropic
           ? {
-              'x-api-key': _keyCtrl.text,
+              'x-api-key': _keyCtrl.text.trim(),
               'anthropic-version': '2023-06-01',
               'content-type': 'application/json',
             }
           : {
-              'Authorization': 'Bearer ${_keyCtrl.text}',
+              'Authorization': 'Bearer ${_keyCtrl.text.trim()}',
               'Content-Type': 'application/json',
             };
 
@@ -105,25 +140,68 @@ class _SettingsScreenState extends State<SettingsScreen> {
           '{"model":"$_model","max_tokens":5,"messages":[{"role":"user","content":"hi"}]}';
       final res = await http
           .post(Uri.parse(url), headers: headers, body: body)
-          .timeout(const Duration(seconds: 12));
+          .timeout(const Duration(seconds: 15));
 
+      if (res.statusCode == 200) {
+        setState(() {
+          _ok = true;
+          _testMsg = 'Connected — $_model is ready to use.';
+        });
+      } else if (res.statusCode == 401) {
+        setState(() {
+          _ok = false;
+          _testMsg = 'Invalid key — authentication rejected. Double-check your key and try again.';
+        });
+      } else if (res.statusCode == 403) {
+        setState(() {
+          _ok = false;
+          _testMsg = 'Access denied — your key does not have permission for this model.';
+        });
+      } else if (res.statusCode == 404 || res.statusCode == 400) {
+        setState(() {
+          _ok = false;
+          _testMsg = 'Model "$_model" not found. Pick a different model from the list.';
+        });
+      } else if (res.statusCode == 429) {
+        setState(() {
+          _ok = false;
+          _testMsg = 'Rate limited — too many requests. Wait a moment and try again.';
+        });
+      } else {
+        setState(() {
+          _ok = false;
+          _testMsg = 'Error ${res.statusCode} — check your key and model. Provider may be experiencing issues.';
+        });
+      }
+    } on SocketException {
       setState(() {
-        _ok = res.statusCode == 200;
-        _testMsg = _ok
-            ? 'Connected — ready.'
-            : 'Status ${res.statusCode}. Check key and model.';
+        _ok = false;
+        _testMsg = 'No internet connection. Check your network and try again.';
+      });
+    } on TimeoutException {
+      setState(() {
+        _ok = false;
+        _testMsg = 'Connection timed out — the provider is slow or unreachable.';
       });
     } catch (e) {
       setState(() {
         _ok = false;
-        _testMsg = 'Network error: $e';
+        _testMsg = 'Unexpected error: ${e.toString().replaceAll('Exception: ', '')}';
       });
     }
     setState(() => _testing = false);
   }
 
   Future<void> _save() async {
-    await _svc.save(provider: _provider, apiKey: _keyCtrl.text, model: _model);
+    final validationError = _validateKey();
+    if (validationError != null && _keyCtrl.text.trim().isNotEmpty) {
+      setState(() {
+        _testMsg = validationError;
+        _ok = false;
+      });
+      return;
+    }
+    await _svc.save(provider: _provider, apiKey: _keyCtrl.text.trim(), model: _model);
     if (!mounted) return;
     context.read<AgentService>().reloadConfig();
     setState(() => _saved = true);
@@ -187,6 +265,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           // ── Mode (Cloud / Local) ────────────────────
           _ModeSection(),
+          const SizedBox(height: T.s_4),
+          // Help card explaining the difference
+          Container(
+            padding: const EdgeInsets.all(T.s_3),
+            decoration: BoxDecoration(
+              color: T.s2,
+              borderRadius: BorderRadius.circular(T.r_md),
+              border: Border.all(color: T.border, width: 0.8),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.info_outline_rounded, size: 14, color: T.slate),
+                    const SizedBox(width: 8),
+                    Text('what is full access?',
+                        style: T.ui(size: 12, color: T.text, weight: FontWeight.w600)),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Cloud mode: Chat with AI directly. Read files on your device, but cannot write or run commands.',
+                  style: T.ui(size: 11, color: T.dim, height: 1.5),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Full Access mode: Requires Termux installed (from F-Droid). Connects to a local agent that can read, write, and execute shell commands on your device.',
+                  style: T.ui(size: 11, color: T.dim, height: 1.5),
+                ),
+              ],
+            ),
+          ),
           const SizedBox(height: T.s_6),
 
           // ── Provider ────────────────────────────────
@@ -807,14 +918,14 @@ class _ModeSection extends StatelessWidget {
         return _Section(
           label: 'mode',
           subtitle: isLocal
-              ? 'full access agent · file & shell tools'
-              : 'cloud mode · chat only · works for everyone',
+              ? 'Full Access — file read/write + shell commands via Termux'
+              : 'Cloud Mode — chat with AI, no Termux needed',
           child: Column(
             children: [
               // Cloud tile
               _ModeTile(
                 title: 'Cloud',
-                desc: 'Direct AI · no Termux required',
+                desc: 'Chat with AI directly · no setup needed · works offline with cached keys',
                 icon: Icons.cloud_outlined,
                 selected: !isLocal,
                 onTap: () => mode.setLocalEnabled(false),
@@ -824,8 +935,8 @@ class _ModeSection extends StatelessWidget {
               _ModeTile(
                 title: 'Full Access',
                 desc: termux
-                    ? 'WebSocket · file + shell tools'
-                    : 'Install Termux to enable',
+                    ? 'Agent with file read/write + shell commands'
+                    : 'Requires Termux installed from F-Droid to enable',
                 icon: termux
                     ? Icons.terminal_rounded
                     : Icons.lock_outline_rounded,

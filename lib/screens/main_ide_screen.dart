@@ -34,8 +34,8 @@ class _MainIDEScreenState extends State<MainIDEScreen>
   late AnimationController _sidebarCtrl;
   late AnimationController _entryCtrl;
 
-  // Keep a reference to the EditorView's state for save support
-  final GlobalKey<EditorViewExposedState> _editorKey = GlobalKey();
+  // Save trigger — EditorView listens to this
+  final ValueNotifier<int> _saveNotifier = ValueNotifier(0);
 
   @override
   void initState() {
@@ -56,6 +56,7 @@ class _MainIDEScreenState extends State<MainIDEScreen>
   void dispose() {
     _sidebarCtrl.dispose();
     _entryCtrl.dispose();
+    _saveNotifier.dispose();
     super.dispose();
   }
 
@@ -104,12 +105,15 @@ class _MainIDEScreenState extends State<MainIDEScreen>
     final idx = _files.indexWhere((f) => f.path == path);
     if (idx >= 0) {
       final isDirty = newContent != _files[idx].content;
-      if (isDirty) {
+      final wasDirty = _dirtyFiles.contains(path);
+      // Only setState when dirty state actually changes — avoids per-keystroke rebuild
+      if (isDirty && !wasDirty) {
         _dirtyFiles.add(path);
-      } else {
+        if (mounted) setState(() {});
+      } else if (!isDirty && wasDirty) {
         _dirtyFiles.remove(path);
+        if (mounted) setState(() {});
       }
-      if (mounted) setState(() {});
     }
   }
 
@@ -117,7 +121,7 @@ class _MainIDEScreenState extends State<MainIDEScreen>
       _files.isNotEmpty && _dirtyFiles.contains(_files[_activeFile].path);
 
   void _saveCurrentFile() {
-    _editorKey.currentState?.saveCurrentFile();
+    _saveNotifier.value++;
   }
 
   Future<bool> _onWillPop() async {
@@ -165,30 +169,37 @@ class _MainIDEScreenState extends State<MainIDEScreen>
     final overlayWidth =
         width < sidebarWidth + 80 ? width * 0.86 : sidebarWidth.toDouble();
 
+    // Account for status bar in the app bar preferred size
+    final topInset = MediaQuery.of(context).padding.top;
+
     return WillPopScope(
       onWillPop: _onWillPop,
       child: Scaffold(
         backgroundColor: T.bg,
-        appBar: TopBar(
-          filename: _files.isEmpty ? null : _files[_activeFile].name,
-          guardianRunning: _guardianOn,
-          sidebarOpen: _sidebarOpen,
-          hasDirtyFile: _hasDirtyFile,
-          onMenuTap: _toggleSidebar,
-          onSave: _files.isNotEmpty ? _saveCurrentFile : null,
-          onSettingsTap: () => Navigator.push(
-            context,
-            PageRouteBuilder(
-              transitionDuration: T.dSlow,
-              pageBuilder: (_, a, __) => const SettingsScreen(),
-              transitionsBuilder: (_, anim, __, child) => FadeTransition(
-                opacity: anim,
-                child: SlideTransition(
-                  position: Tween(
-                    begin: const Offset(0, 0.04),
-                    end: Offset.zero,
-                  ).animate(CurvedAnimation(parent: anim, curve: T.eOut)),
-                  child: child,
+        resizeToAvoidBottomInset: false,
+        appBar: PreferredSize(
+          preferredSize: Size.fromHeight(52 + topInset),
+          child: TopBar(
+            filename: _files.isEmpty ? null : _files[_activeFile].name,
+            guardianRunning: _guardianOn,
+            sidebarOpen: _sidebarOpen,
+            hasDirtyFile: _hasDirtyFile,
+            onMenuTap: _toggleSidebar,
+            onSave: _files.isNotEmpty ? _saveCurrentFile : null,
+            onSettingsTap: () => Navigator.push(
+              context,
+              PageRouteBuilder(
+                transitionDuration: T.dSlow,
+                pageBuilder: (_, a, __) => const SettingsScreen(),
+                transitionsBuilder: (_, anim, __, child) => FadeTransition(
+                  opacity: anim,
+                  child: SlideTransition(
+                    position: Tween(
+                      begin: const Offset(0, 0.04),
+                      end: Offset.zero,
+                    ).animate(CurvedAnimation(parent: anim, curve: T.eOut)),
+                    child: child,
+                  ),
                 ),
               ),
             ),
@@ -206,13 +217,13 @@ class _MainIDEScreenState extends State<MainIDEScreen>
                     children: [
                       SizedBox(
                         height: editorH,
-                        child: EditorViewExposed(
-                          key: _editorKey,
+                        child: EditorView(
                           files: _files,
                           activeIndex: _activeFile,
                           onTabTap: (i) => setState(() => _activeFile = i),
                           onTabClose: _closeFile,
                           onContentChanged: _handleContentChanged,
+                          saveNotifier: _saveNotifier,
                         ),
                       ),
                       _SplitHandle(
@@ -226,7 +237,6 @@ class _MainIDEScreenState extends State<MainIDEScreen>
                       Expanded(
                         child: Column(
                           children: [
-                            // Single "Agent" tab — terminal hidden until functional
                             Container(
                               height: 36,
                               color: T.s1,
@@ -260,7 +270,7 @@ class _MainIDEScreenState extends State<MainIDEScreen>
                         onTap: _toggleSidebar,
                         child: Container(
                           color: Colors.black
-                              .withOpacity(0.42 * _sidebarCtrl.value),
+                              .withValues(alpha: 0.42 * _sidebarCtrl.value),
                         ),
                       ),
                     ),
@@ -282,7 +292,7 @@ class _MainIDEScreenState extends State<MainIDEScreen>
                       child: Material(
                         elevation: 14,
                         color: T.s1,
-                        shadowColor: Colors.black.withOpacity(0.6),
+                        shadowColor: Colors.black.withValues(alpha: 0.6),
                         child: SidebarWidget(onFileOpen: _openFile),
                       ),
                     ),
@@ -294,49 +304,6 @@ class _MainIDEScreenState extends State<MainIDEScreen>
         ),
       ),
     );
-  }
-}
-
-// ── Editor wrapper that exposes save method ──────────────────────────────
-class EditorViewExposed extends StatefulWidget {
-  final List<OpenFile> files;
-  final int activeIndex;
-  final Function(int) onTabTap;
-  final Function(int) onTabClose;
-  final void Function(String path, String newContent)? onContentChanged;
-
-  const EditorViewExposed({
-    super.key,
-    required this.files,
-    required this.activeIndex,
-    required this.onTabTap,
-    required this.onTabClose,
-    this.onContentChanged,
-  });
-
-  @override
-  State<EditorViewExposed> createState() => EditorViewExposedState();
-}
-
-class EditorViewExposedState extends State<EditorViewExposed> {
-  @override
-  Widget build(BuildContext context) {
-    return EditorView(
-      files: widget.files,
-      activeIndex: widget.activeIndex,
-      onTabTap: widget.onTabTap,
-      onTabClose: widget.onTabClose,
-      onContentChanged: widget.onContentChanged,
-    );
-  }
-
-  /// Public method that forwards to the inner EditorView's save logic.
-  /// This is a simplified approach — the real save happens inside
-  /// EditorView's state via NativeFileService.
-  void saveCurrentFile() {
-    // The EditorView handles its own save via NativeFileService.
-    // This method can be extended if we need external trigger.
-    // For now the save button is wired inside EditorView's tab strip.
   }
 }
 

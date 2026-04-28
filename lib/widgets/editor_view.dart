@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_highlight/themes/monokai-sublime.dart';
 import '../theme/omni_theme.dart';
 import '../services/native_file_service.dart';
 
@@ -19,6 +18,8 @@ class EditorView extends StatefulWidget {
   final Function(int) onTabClose;
   final Function(String path, String content)? onSave;
   final Function(String path, String newContent)? onContentChanged;
+  /// External save trigger — parent can increment to request a save.
+  final ValueNotifier<int>? saveNotifier;
 
   const EditorView({
     super.key,
@@ -28,6 +29,7 @@ class EditorView extends StatefulWidget {
     required this.onTabClose,
     this.onSave,
     this.onContentChanged,
+    this.saveNotifier,
   });
 
   @override
@@ -114,9 +116,32 @@ class _EditorViewState extends State<EditorView> with WidgetsBindingObserver {
     }
   }
 
+  // ── External save trigger ──────────────────────────────────────────────
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Re-register listener when notifier changes (only once).
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    widget.saveNotifier?.addListener(_onSaveTriggered);
+  }
+
+  void _onSaveTriggered() {
+    if (mounted) _saveCurrentFile();
+  }
+
   @override
   void didUpdateWidget(EditorView old) {
     super.didUpdateWidget(old);
+    // Re-register save notifier if it changed.
+    if (widget.saveNotifier != old.saveNotifier) {
+      old.saveNotifier?.removeListener(_onSaveTriggered);
+      widget.saveNotifier?.addListener(_onSaveTriggered);
+    }
     // Clean controllers for closed files
     final openPaths = widget.files.map((f) => f.path).toSet();
     _ctrls.keys.toList().forEach((k) {
@@ -136,8 +161,6 @@ class _EditorViewState extends State<EditorView> with WidgetsBindingObserver {
     for (final f in widget.files) {
       final ctrl = _ctrls[f.path];
       if (ctrl != null && _originalContent[f.path] != null) {
-        // If the file object's content differs from our original but matches
-        // (meaning it was re-opened from disk), refresh.
         if (f.content != _originalContent[f.path] && f.content == ctrl.text) {
           _originalContent[f.path] = f.content;
         }
@@ -146,14 +169,9 @@ class _EditorViewState extends State<EditorView> with WidgetsBindingObserver {
   }
 
   @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-  }
-
-  @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    widget.saveNotifier?.removeListener(_onSaveTriggered);
     for (final t in _autoSaveTimers.values) {
       t.cancel();
     }
@@ -182,7 +200,6 @@ class _EditorViewState extends State<EditorView> with WidgetsBindingObserver {
           final diskContent = result['content']?.toString() ?? '';
           final ctrl = _ctrls[f.path];
           final original = _originalContent[f.path] ?? '';
-          // Only prompt if disk differs from what we last saved (not from live edits)
           if (diskContent != original && mounted) {
             final shouldReload = await showDialog<bool>(
               context: context,
@@ -237,7 +254,6 @@ class _EditorViewState extends State<EditorView> with WidgetsBindingObserver {
           dirtyFiles: widget.files.map((f) => _isDirty(f.path)).toList(),
           onTap: widget.onTabTap,
           onClose: widget.onTabClose,
-          onSaveCurrent: _saveCurrentFile,
         ),
         Container(height: 1, color: T.border),
         Expanded(
@@ -253,14 +269,13 @@ class _EditorViewState extends State<EditorView> with WidgetsBindingObserver {
   }
 }
 
-// ── Tab strip ────────────────────────────────────────────────────────────
+// ── Tab strip (no save button — save lives in TopBar only) ───────────────
 class _TabStrip extends StatelessWidget {
   final List<OpenFile> files;
   final int active;
   final List<bool> dirtyFiles;
   final Function(int) onTap;
   final Function(int) onClose;
-  final VoidCallback onSaveCurrent;
 
   const _TabStrip({
     required this.files,
@@ -268,7 +283,6 @@ class _TabStrip extends StatelessWidget {
     required this.dirtyFiles,
     required this.onTap,
     required this.onClose,
-    required this.onSaveCurrent,
   });
 
   @override
@@ -276,38 +290,16 @@ class _TabStrip extends StatelessWidget {
     return Container(
       height: 36,
       color: T.s1,
-      child: Row(
-        children: [
-          Expanded(
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemCount: files.length,
-              itemBuilder: (_, i) => _Tab(
-                file: files[i],
-                active: i == active,
-                dirty: dirtyFiles.length > i ? dirtyFiles[i] : false,
-                onTap: () => onTap(i),
-                onClose: () => onClose(i),
-              ),
-            ),
-          ),
-          // Save button in tab strip
-          if (files.isNotEmpty)
-            GestureDetector(
-              onTap: onSaveCurrent,
-              child: MouseRegion(
-                cursor: SystemMouseCursors.click,
-                child: Container(
-                  width: 36,
-                  height: 36,
-                  decoration: const BoxDecoration(
-                    border: Border(left: BorderSide(color: T.border)),
-                  ),
-                  child: const Icon(Icons.save_outlined, size: 16, color: T.dim),
-                ),
-              ),
-            ),
-        ],
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        itemCount: files.length,
+        itemBuilder: (_, i) => _Tab(
+          file: files[i],
+          active: i == active,
+          dirty: dirtyFiles.length > i ? dirtyFiles[i] : false,
+          onTap: () => onTap(i),
+          onClose: () => onClose(i),
+        ),
       ),
     );
   }
@@ -422,7 +414,7 @@ class _CodeCanvas extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _Gutter(ctrl: ctrl),
+          _Gutter(ctrl: ctrl, scroll: scroll),
           Container(width: 1, color: T.border),
           Expanded(
             child: TextField(
@@ -448,7 +440,8 @@ class _CodeCanvas extends StatelessWidget {
 
 class _Gutter extends StatefulWidget {
   final TextEditingController ctrl;
-  const _Gutter({required this.ctrl});
+  final ScrollController scroll;
+  const _Gutter({required this.ctrl, required this.scroll});
 
   @override
   State<_Gutter> createState() => _GutterState();
@@ -457,10 +450,16 @@ class _Gutter extends StatefulWidget {
 class _GutterState extends State<_Gutter> {
   int _lines = 1;
 
+  /// Editor line height must match the TextField style:
+  /// mono(size: 13, height: 1.6) → 13 × 1.6 = 20.8
+  static const double _lineHeight = 20.8;
+  static const double _contentPadTop = 12.0;
+
   @override
   void initState() {
     super.initState();
     widget.ctrl.addListener(_update);
+    widget.scroll.addListener(_onScroll);
     _update();
   }
 
@@ -469,25 +468,45 @@ class _GutterState extends State<_Gutter> {
     if (n != _lines) setState(() => _lines = n);
   }
 
+  void _onScroll() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
     widget.ctrl.removeListener(_update);
+    widget.scroll.removeListener(_onScroll);
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final scrollOffset =
+        widget.scroll.hasClients ? widget.scroll.offset : 0.0;
+
     return Container(
       width: 46,
       color: T.s1,
-      padding: const EdgeInsets.only(top: 12, right: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: List.generate(
-          _lines,
-          (i) => Text(
-            '${i + 1}',
-            style: T.mono(size: 11.5, color: T.faint, height: 1.82),
+      padding: const EdgeInsets.only(top: _contentPadTop, right: 10),
+      child: ClipRect(
+        child: SingleChildScrollView(
+          controller: widget.scroll,
+          physics: const NeverScrollableScrollPhysics(),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: List.generate(
+              _lines,
+              (i) => SizedBox(
+                height: _lineHeight,
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    '${i + 1}',
+                    style: T.mono(size: 11.5, color: T.faint),
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
       ),
@@ -505,12 +524,11 @@ class WelcomeView extends StatelessWidget {
       color: T.bg,
       child: Stack(
         children: [
-          // Background grain dots
           const Positioned.fill(
             child: CustomPaint(painter: _DotGrid()),
           ),
           Center(
-            child: Padding(
+            child: SingleChildScrollView(
               padding: const EdgeInsets.all(T.s_5),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -601,9 +619,10 @@ class _HintRow extends StatelessWidget {
 
 class _DotGrid extends CustomPainter {
   const _DotGrid();
+
   @override
   void paint(Canvas canvas, Size size) {
-    final p = Paint()..color = T.border.withOpacity(0.5);
+    final p = Paint()..color = T.border.withValues(alpha: 0.5);
     const step = 28.0;
     for (double x = step; x < size.width; x += step) {
       for (double y = step; y < size.height; y += step) {
