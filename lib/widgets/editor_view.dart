@@ -201,11 +201,11 @@ class _EditorViewState extends State<EditorView> with WidgetsBindingObserver {
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.pop(context, false),
-                    child: const Text('keep mine', style: T.ui(size: 12, color: T.muted)),
+                    child: Text('keep mine', style: T.ui(size: 12, color: T.muted)),
                   ),
                   TextButton(
                     onPressed: () => Navigator.pop(context, true),
-                    child: const Text('reload', style: T.ui(size: 12, color: T.accent, weight: FontWeight.w600)),
+                    child: Text('reload', style: T.ui(size: 12, color: T.accent, weight: FontWeight.w600)),
                   ),
                 ],
               ),
@@ -600,6 +600,7 @@ class _HintRow extends StatelessWidget {
 }
 
 class _DotGrid extends CustomPainter {
+  const _DotGrid();
   @override
   void paint(Canvas canvas, Size size) {
     final p = Paint()..color = T.border.withOpacity(0.5);
