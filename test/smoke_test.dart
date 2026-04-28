@@ -147,7 +147,13 @@ void main() {
       );
 
       expect(find.text('a pocket-sized'), findsOneWidget);
-      expect(find.textContaining('development'), findsWidgets);
+      // 'development' is inside a RichText (TextSpan), not a Text widget.
+      expect(
+        find.byWidgetPredicate(
+          (w) => w is RichText && w.text.toPlainText().contains('development'),
+        ),
+        findsWidgets,
+      );
     });
 
     testWidgets('displays hint rows with labels', (tester) async {
