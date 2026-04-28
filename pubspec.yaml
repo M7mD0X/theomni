@@ -12,14 +12,21 @@ dependencies:
     sdk: flutter
   web_socket_channel: ^2.4.0
   shared_preferences: ^2.2.3
+  flutter_secure_storage: ^9.2.2
   http: ^1.2.1
+  dio: ^5.4.3
   provider: ^6.1.2
   google_fonts: ^6.2.1
+  flutter_highlight: ^0.7.0
+  highlight: ^0.7.0
+  path: ^1.9.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  mockito: ^5.4.4
+  build_runner: ^2.4.13
 
 flutter:
   uses-material-design: true

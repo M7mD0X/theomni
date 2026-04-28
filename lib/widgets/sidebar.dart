@@ -1030,6 +1030,13 @@ class SearchPane extends StatefulWidget {
 
 class _SearchPaneState extends State<SearchPane> {
   static const _agent = 'http://localhost:8080';
+  static const _skipDirs = {
+    'node_modules', '.git', '.dart_tool', 'build', '.gradle', '.idea',
+    'dist', '.next', 'out',
+  };
+  static const int _maxFileSize = 512 * 1024; // 512 KB
+  static const int _maxResults = 200;
+
   final _ctrl = TextEditingController();
   List<_Root> _roots = const [];
   _Root? _root;
@@ -1037,11 +1044,29 @@ class _SearchPaneState extends State<SearchPane> {
   bool _searching = false;
   bool _truncated = false;
   String? _error;
+  bool _agentReachable = true;
 
   @override
   void initState() {
     super.initState();
     _loadRoots();
+  }
+
+  /// Always-available default roots, even when the agent is offline.
+  List<_Root> _defaultRoots() {
+    final mode = context.read<AppModeService>();
+    final ws = mode.workspacePath;
+    final out = <_Root>[
+      _Root(id: 'omniide', label: 'OmniIDE', path: ws),
+      _Root(id: 'sdcard', label: 'Device', path: '/storage/emulated/0'),
+    ];
+    if (Directory('/data/data/com.termux/files/home').existsSync()) {
+      out.add(const _Root(
+          id: 'termux',
+          label: 'Termux Home',
+          path: '/data/data/com.termux/files/home'));
+    }
+    return out;
   }
 
   Future<void> _loadRoots() async {
@@ -1054,11 +1079,18 @@ class _SearchPaneState extends State<SearchPane> {
           .map((r) => _Root(id: r['id'], label: r['label'], path: r['path']))
           .toList();
       setState(() {
+        _agentReachable = true;
         _roots = roots;
         _root = roots.isNotEmpty ? roots.first : null;
       });
     } catch (_) {
-      setState(() => _error = 'Agent unreachable');
+      // Agent unreachable — fall back to native default roots.
+      final defaults = _defaultRoots();
+      setState(() {
+        _agentReachable = false;
+        _roots = defaults;
+        _root = defaults.isNotEmpty ? defaults.first : null;
+      });
     }
   }
 
@@ -1071,6 +1103,12 @@ class _SearchPaneState extends State<SearchPane> {
       _hits = [];
       _truncated = false;
     });
+
+    if (!_agentReachable) {
+      await _nativeSearch(q);
+      return;
+    }
+
     try {
       final uri = Uri.parse('$_agent/search').replace(queryParameters: {
         'root': _root!.id,
@@ -1106,19 +1144,111 @@ class _SearchPaneState extends State<SearchPane> {
     }
   }
 
+  /// Native recursive file search using dart:io Directory listing + grep.
+  Future<void> _nativeSearch(String query) async {
+    final rootPath = _root!.path;
+    final hits = <_Hit>[];
+    final queryLower = query.toLowerCase();
+
+    try {
+      final dir = Directory(rootPath);
+      if (!await dir.exists()) {
+        setState(() {
+          _error = 'Root path does not exist: $rootPath';
+          _searching = false;
+        });
+        return;
+      }
+
+      await for (final entity
+          in dir.list(recursive: true, followLinks: false)) {
+        if (hits.length >= _maxResults) break;
+
+        if (entity is! File) continue;
+
+        // Skip files inside ignored directories.
+        final rel = entity.path.startsWith(rootPath)
+            ? entity.path.substring(rootPath.length)
+            : entity.path;
+        final segments = rel.split('/').where((s) => s.isNotEmpty);
+        if (segments.any((s) => _skipDirs.contains(s))) continue;
+
+        // Skip files over 512 KB.
+        try {
+          final stat = await entity.stat();
+          if (stat.size > _maxFileSize) continue;
+        } catch (_) {
+          continue;
+        }
+
+        // Attempt to read and grep.
+        try {
+          final content = await entity.readAsString();
+          final lines = const LineSplitter().convert(content);
+          for (var i = 0; i < lines.length; i++) {
+            if (hits.length >= _maxResults) break;
+            if (lines[i].toLowerCase().contains(queryLower)) {
+              final lineNum = i + 1;
+              final preview = lines[i].trim();
+              final relPath = segments.join('/');
+              hits.add(_Hit(
+                relPath: relPath,
+                absPath: entity.path,
+                line: lineNum,
+                preview: preview.isEmpty ? '(empty line)' : preview,
+              ));
+            }
+          }
+        } catch (_) {
+          // Binary or unreadable file — skip silently.
+        }
+      }
+    } catch (e) {
+      setState(() {
+        _error = 'Native search error: $e';
+        _searching = false;
+      });
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _hits = hits;
+      _truncated = hits.length >= _maxResults;
+      _searching = false;
+    });
+  }
+
   Future<void> _openHit(_Hit h) async {
     if (_root == null) return;
-    try {
-      final uri = Uri.parse('$_agent/file').replace(queryParameters: {
-        'root': _root!.id,
-        'path': h.relPath,
-      });
-      final res = await http.get(uri).timeout(const Duration(seconds: 8));
-      final data = jsonDecode(res.body);
-      if (data['content'] != null) {
-        final name = h.relPath.split('/').last;
-        widget.onFileOpen(data['absPath'] ?? h.absPath, name, data['content']);
+    final name = h.relPath.split('/').last;
+
+    if (_agentReachable) {
+      try {
+        final uri = Uri.parse('$_agent/file').replace(queryParameters: {
+          'root': _root!.id,
+          'path': h.relPath,
+        });
+        final res = await http.get(uri).timeout(const Duration(seconds: 8));
+        final data = jsonDecode(res.body);
+        if (data['content'] != null) {
+          widget.onFileOpen(data['absPath'] ?? h.absPath, name, data['content']);
+        }
+        return;
+      } catch (_) {
+        // Agent died mid-session — fall through to native.
+        setState(() => _agentReachable = false);
       }
+    }
+
+    // Native fallback.
+    try {
+      final result = await NativeFileService.readFile(h.absPath);
+      if (result['error'] != null) return;
+      widget.onFileOpen(
+          result['absPath']?.toString() ?? h.absPath,
+          name,
+          result['content']?.toString() ?? '');
     } catch (_) {}
   }
 
@@ -1132,6 +1262,25 @@ class _SearchPaneState extends State<SearchPane> {
   Widget build(BuildContext context) {
     return Column(
       children: [
+        // Offline banner
+        if (!_agentReachable)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(
+                horizontal: T.s_3, vertical: 5),
+            decoration: const BoxDecoration(
+              color: Color(0x1AFF9800),
+              border: Border(
+                  bottom: BorderSide(color: Color(0x33FF9800))),
+            ),
+            child: Row(children: [
+              const Icon(Icons.cloud_off_rounded,
+                  size: 12, color: Color(0xFFFF9800)),
+              const SizedBox(width: 6),
+              Text('Agent offline — using native search',
+                  style: T.ui(size: 10, color: Color(0xFFFFB74D))),
+            ]),
+          ),
         Container(
           color: T.s2,
           padding: const EdgeInsets.fromLTRB(T.s_3, T.s_3, T.s_3, T.s_2),

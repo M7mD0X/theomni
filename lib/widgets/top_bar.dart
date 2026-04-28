@@ -5,8 +5,10 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
   final String? filename;
   final bool guardianRunning;
   final bool sidebarOpen;
+  final bool hasDirtyFile;
   final VoidCallback onMenuTap;
   final VoidCallback onSettingsTap;
+  final VoidCallback? onSave;
 
   const TopBar({
     super.key,
@@ -15,6 +17,8 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
     required this.sidebarOpen,
     required this.onMenuTap,
     required this.onSettingsTap,
+    this.hasDirtyFile = false,
+    this.onSave,
   });
 
   @override
@@ -55,7 +59,7 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
                   ),
                 ),
                 TextSpan(
-                  text: '·ide',
+                  text: '\u00b7ide',
                   style: T.display(
                     size: 18,
                     weight: FontWeight.w400,
@@ -89,12 +93,36 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
+                    // Dirty dot in top bar breadcrumb
+                    if (hasDirtyFile)
+                      Container(
+                        width: 6,
+                        height: 6,
+                        margin: const EdgeInsets.only(left: 5),
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: T.accent,
+                        ),
+                      ),
                   ],
                 ),
               ),
             ),
 
           const Spacer(),
+
+          // Save button
+          if (onSave != null)
+            _IconBtn(
+              icon: hasDirtyFile
+                  ? Icons.save_rounded
+                  : Icons.save_outlined,
+              onTap: onSave!,
+              tip: 'Save (Ctrl+S)',
+              highlighted: hasDirtyFile,
+            ),
+          if (onSave != null) const SizedBox(width: 4),
+
           _StatusPill(active: guardianRunning),
           const SizedBox(width: T.s_2),
           _IconBtn(
@@ -186,7 +214,13 @@ class _IconBtn extends StatefulWidget {
   final IconData icon;
   final VoidCallback onTap;
   final String tip;
-  const _IconBtn({required this.icon, required this.onTap, required this.tip});
+  final bool highlighted;
+  const _IconBtn({
+    required this.icon,
+    required this.onTap,
+    required this.tip,
+    this.highlighted = false,
+  });
 
   @override
   State<_IconBtn> createState() => _IconBtnState();
@@ -216,14 +250,19 @@ class _IconBtnState extends State<_IconBtn> {
             width: 34,
             height: 34,
             decoration: BoxDecoration(
-              color:
-                  _pressed ? T.accentBg : (_hover ? T.s3 : Colors.transparent),
+              color: _pressed
+                  ? T.accentBg
+                  : (widget.highlighted
+                      ? (_hover ? T.accentBg : T.s3)
+                      : (_hover ? T.s3 : Colors.transparent)),
               borderRadius: BorderRadius.circular(T.r_md),
             ),
             child: Icon(
               widget.icon,
               size: 18,
-              color: _hover || _pressed ? T.text : T.dim,
+              color: (widget.highlighted || _hover || _pressed)
+                  ? T.accent
+                  : T.dim,
             ),
           ),
         ),

@@ -1,9 +1,14 @@
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class SettingsService {
   static const _kProvider = 'provider';
   static const _kKey = 'api_key';
   static const _kModel = 'model';
+
+  static const _storage = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
+  );
 
   static const providers = {
     'openrouter': 'OpenRouter',
@@ -19,11 +24,10 @@ class SettingsService {
   };
 
   Future<Map<String, String>> load() async {
-    final p = await SharedPreferences.getInstance();
     return {
-      'provider': p.getString(_kProvider) ?? 'openrouter',
-      'apiKey': p.getString(_kKey) ?? '',
-      'model': p.getString(_kModel) ?? 'anthropic/claude-3.5-sonnet',
+      'provider': await _storage.read(key: _kProvider) ?? 'openrouter',
+      'apiKey': await _storage.read(key: _kKey) ?? '',
+      'model': await _storage.read(key: _kModel) ?? 'anthropic/claude-3.5-sonnet',
     };
   }
 
@@ -32,14 +36,20 @@ class SettingsService {
     required String apiKey,
     required String model,
   }) async {
-    final p = await SharedPreferences.getInstance();
-    await p.setString(_kProvider, provider);
-    await p.setString(_kKey, apiKey);
-    await p.setString(_kModel, model);
+    await _storage.write(key: _kProvider, value: provider);
+    await _storage.write(key: _kKey, value: apiKey);
+    await _storage.write(key: _kModel, value: model);
   }
 
   Future<bool> hasKey() async {
     final d = await load();
     return d['apiKey']!.isNotEmpty;
+  }
+
+  /// Delete all stored settings — useful for sign-out / factory reset.
+  Future<void> clearAll() async {
+    await _storage.delete(key: _kProvider);
+    await _storage.delete(key: _kKey);
+    await _storage.delete(key: _kModel);
   }
 }

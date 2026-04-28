@@ -15,9 +15,9 @@ analyzer:
 
 linter:
   rules:
-    avoid_print: false
-    prefer_const_constructors: false
-    prefer_const_constructors_in_immutables: false
-    prefer_const_declarations: false
-    prefer_const_literals_to_create_immutables: false
-    use_key_in_widget_constructors: false
+    avoid_print: true
+    prefer_const_constructors: true
+    prefer_const_constructors_in_immutables: true
+    prefer_const_declarations: true
+    prefer_const_literals_to_create_immutables: true
+    use_key_in_widget_constructors: true

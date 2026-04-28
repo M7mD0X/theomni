@@ -72,6 +72,14 @@ function resolveSafe(rawPath, rootId) {
   if (!rawPath || rawPath === '') target = root.path;
   else if (path.isAbsolute(rawPath)) target = path.resolve(rawPath);
   else target = path.resolve(root.path, rawPath);
+  // Resolve symlinks to prevent path traversal via symlinks
+  try {
+    target = fs.realpathSync(target || root.path);
+  } catch {
+    // If realpath fails (e.g., broken symlink or doesn't exist yet),
+    // use the non-resolved path for new-file creation scenarios.
+    target = target || root.path;
+  }
   const allowed = ROOTS.some(r => isUnder(target, r.path));
   if (!allowed) {
     const err = new Error(`Path is outside allowed roots: ${target}`);
@@ -190,7 +198,7 @@ const SKIP_DIRS = new Set([
 
 app.get('/search', (req, res) => {
   try {
-    const root = resolveSafe(req.query.path, req.query.root);
+    const root = resolveSafe(undefined, req.query.root);
     const q    = (req.query.q || '').toString();
     if (!q) return res.json({ results: [] });
     if (!fs.existsSync(root)) return res.json({ error: 'Root not found' });
@@ -463,6 +471,65 @@ function parseTool(text) {
   return null;
 }
 
+function validateShellCommand(cmd, workspace) {
+  // Block empty commands
+  if (!cmd || !cmd.trim()) return { ok: false, reason: 'empty command' };
+  
+  const normalized = cmd.trim();
+  
+  // Block explicit destructive patterns (normalized)
+  const destructivePatterns = [
+    /\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)?\/\s*$/,
+    /\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)?\/\*.*$/,
+    /\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)-/,
+    /\bmkfs\b/,
+    /\bdd\s+if=/,
+    /\bshutdown\b/,
+    /\breboot\b/,
+    /\bpoweroff\b/,
+    /\binit\s+0\b/,
+    /\b:?\(\)\s*\{/,
+    />\s*\/dev\/sd[a-z]/,
+    /\bmv\s+\/\s/,
+    /\bcp\s+.*\/dev\/zero/,
+    /\bchmod\s+(-R\s+)?777\s+\//,
+    /\bchown\s+(-R\s+)?/,
+  ];
+  
+  for (const pattern of destructivePatterns) {
+    if (pattern.test(normalized)) {
+      return { ok: false, reason: 'destructive command pattern detected' };
+    }
+  }
+  
+  // Block path traversal attempts
+  const pathTraversal = /(?:^|\s)(?:cd|rm|mv|cp|chmod|chown|mkdir|rmdir|ln|cat|write)\s+.*(?:\.\.\/){3,}/;
+  if (pathTraversal.test(normalized)) {
+    return { ok: false, reason: 'excessive path traversal detected' };
+  }
+  
+  // Block commands targeting system directories
+  const systemDirs = ['/bin', '/sbin', '/usr/bin', '/usr/sbin', '/usr/lib', '/boot', '/proc', '/sys', '/etc/shadow', '/etc/passwd'];
+  for (const dir of systemDirs) {
+    const pattern = new RegExp(`(?:^|\\s)(?:rm|mv|cp|chmod|chown|write|dd)\\s+.*${dir.replace('/', '\\/')}`, 'i');
+    if (pattern.test(normalized)) {
+      return { ok: false, reason: `system directory ${dir} is protected` };
+    }
+  }
+  
+  // Block fork bombs
+  if (/\b(function|sh)\s*\(\)\s*\{/.test(normalized) && /\b\1\b/.test(normalized)) {
+    return { ok: false, reason: 'recursive function (fork bomb pattern) detected' };
+  }
+  
+  // Validate maximum command length
+  if (normalized.length > 4096) {
+    return { ok: false, reason: 'command too long (max 4096 chars)' };
+  }
+  
+  return { ok: true };
+}
+
 // ── Tool runtime ────────────────────────────────────────────────────────
 async function executeTool(ws, tool, params) {
   const WORKSPACE = _toolWorkspace();
@@ -577,8 +644,8 @@ async function executeTool(ws, tool, params) {
       return hits.length ? hits.join('\n') : '(no matches)';
     }
     case 'run_shell': {
-      const forbidden = ['rm -rf /', 'mkfs', 'dd if=', 'shutdown', 'reboot', ':(){', 'mv / '];
-      for (const f of forbidden) if (params.cmd.includes(f)) return 'Command blocked for safety.';
+      const safe = validateShellCommand(params.cmd, WORKSPACE);
+      if (!safe.ok) return `Command blocked: ${safe.reason}`;
       return await runShellLive(ws, params.cmd, WORKSPACE);
     }
     case 'git_status': {

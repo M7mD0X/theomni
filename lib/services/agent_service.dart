@@ -1,8 +1,19 @@
+/// Dual-mode agent implementation.
+///
+/// Implements [AgentServiceInterface] and can be swapped for any other
+/// implementation that satisfies the same contract.
+///
+///   • Cloud mode: send `messages` directly to the configured AI provider
+///     over HTTPS. No tools, just chat. Always "connected" once a key is set.
+///
+///   • Local mode: existing WebSocket protocol against ws://localhost:8080.
+
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'agent_interface.dart';
 import 'app_mode_service.dart';
 import 'settings_service.dart';
 
@@ -18,13 +29,7 @@ class AgentMessage {
       : time = DateTime.now();
 }
 
-/// Dual-mode agent.
-///
-///   • Cloud mode: send `messages` directly to the configured AI provider over
-///     HTTPS. No tools, just chat. Always "connected" once a key is set.
-///
-///   • Local mode: existing WebSocket protocol against ws://localhost:8080.
-class AgentService extends ChangeNotifier {
+class AgentService extends ChangeNotifier implements AgentServiceInterface {
   static const startCommand = '~/omni-ide/start_agent.sh';
   static const agentUrl = 'http://localhost:8080';
 
@@ -76,7 +81,7 @@ class AgentService extends ChangeNotifier {
     }
   }
 
-  // ── Public API ──────────────────────────────────────
+  // ── Public API (AgentServiceInterface) ──────────────
   Future<void> connect({bool fromUser = false}) async {
     if (modeService.mode == AppMode.cloud) {
       _enterCloudReady();
@@ -125,7 +130,7 @@ class AgentService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ── Sending ─────────────────────────────────────────
+  // ── Sending (Cloud + Local) ──────────────────────
   Future<void> sendMessage(String text) async {
     if (text.trim().isEmpty) return;
 
@@ -263,7 +268,7 @@ class AgentService extends ChangeNotifier {
     });
   }
 
-  // ── Local WS handlers ───────────────────────────────
+  // ── Local-mode WebSocket handlers ────────────────
   void _onMessage(dynamic raw) async {
     final msg = jsonDecode(raw as String);
     final type = msg['type'] as String?;
@@ -407,7 +412,7 @@ class AgentService extends ChangeNotifier {
     _setState(AgentState.connected, 'Cloud Mode · ready');
   }
 
-  // ── Helpers ─────────────────────────────────────────
+  // ── Internal helpers ───────────────────────────────
   void _send(Map<String, dynamic> data) {
     _channel?.sink.add(jsonEncode(data));
   }
