@@ -109,28 +109,36 @@ class TopBar extends StatelessWidget implements PreferredSizeWidget {
               ),
             ),
 
+          // Trailing actions — use FittedBox to prevent overflow
           const Spacer(),
-
-          // Save button
-          if (onSave != null)
-            _IconBtn(
-              icon: hasDirtyFile
-                  ? Icons.save_rounded
-                  : Icons.save_outlined,
-              onTap: onSave!,
-              tip: 'Save (Ctrl+S)',
-              highlighted: hasDirtyFile,
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerRight,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Save button
+                if (onSave != null)
+                  _IconBtn(
+                    icon: hasDirtyFile
+                        ? Icons.save_rounded
+                        : Icons.save_outlined,
+                    onTap: onSave!,
+                    tip: 'Save (Ctrl+S)',
+                    highlighted: hasDirtyFile,
+                  ),
+                if (onSave != null) const SizedBox(width: 4),
+                _StatusPill(active: guardianRunning),
+                const SizedBox(width: T.s_2),
+                _IconBtn(
+                  icon: Icons.tune_rounded,
+                  onTap: onSettingsTap,
+                  tip: 'Settings',
+                ),
+                const SizedBox(width: T.s_2),
+              ],
             ),
-          if (onSave != null) const SizedBox(width: 4),
-
-          _StatusPill(active: guardianRunning),
-          const SizedBox(width: T.s_2),
-          _IconBtn(
-            icon: Icons.tune_rounded,
-            onTap: onSettingsTap,
-            tip: 'Settings',
           ),
-          const SizedBox(width: T.s_2),
         ],
       ),
     );
@@ -155,7 +163,19 @@ class _StatusPillState extends State<_StatusPill>
     _ctrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1600),
-    )..repeat(reverse: true);
+    );
+    if (widget.active) _ctrl.repeat(reverse: true);
+  }
+
+  @override
+  void didUpdateWidget(_StatusPill old) {
+    super.didUpdateWidget(old);
+    if (widget.active && !old.active) {
+      _ctrl.repeat(reverse: true);
+    } else if (!widget.active && old.active) {
+      _ctrl.stop();
+      _ctrl.reset();
+    }
   }
 
   @override
@@ -180,25 +200,34 @@ class _StatusPillState extends State<_StatusPill>
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          AnimatedBuilder(
-            animation: _ctrl,
-            builder: (_, __) => Container(
+          // Only animate when active — saves ~60 rebuilds/sec when idle
+          if (widget.active)
+            AnimatedBuilder(
+              animation: _ctrl,
+              builder: (_, __) => Container(
+                width: 6,
+                height: 6,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: color,
+                  boxShadow: [
+                    BoxShadow(
+                      color: color.withOpacity(0.3 + 0.5 * _ctrl.value),
+                      blurRadius: 4 + 3 * _ctrl.value,
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            Container(
               width: 6,
               height: 6,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: color,
-                boxShadow: widget.active
-                    ? [
-                        BoxShadow(
-                          color: color.withOpacity(0.3 + 0.5 * _ctrl.value),
-                          blurRadius: 4 + 3 * _ctrl.value,
-                        ),
-                      ]
-                    : null,
               ),
             ),
-          ),
           const SizedBox(width: 7),
           Text(
             widget.active ? 'Guardian' : 'Idle',

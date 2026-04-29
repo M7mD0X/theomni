@@ -262,41 +262,46 @@ class _MainIDEScreenState extends State<MainIDEScreen>
                   ),
 
                   // Scrim behind the floating sidebar
+                  // Only listen to animation while sidebar is transitioning
                   IgnorePointer(
                     ignoring: !_sidebarOpen,
-                    child: AnimatedBuilder(
-                      animation: _sidebarCtrl,
-                      builder: (_, __) => GestureDetector(
-                        onTap: _toggleSidebar,
-                        child: Container(
-                          color: Colors.black
-                              .withValues(alpha: 0.42 * _sidebarCtrl.value),
-                        ),
-                      ),
-                    ),
+                    child: _sidebarCtrl.isAnimating || _sidebarOpen
+                        ? AnimatedBuilder(
+                            animation: _sidebarCtrl,
+                            builder: (_, __) => GestureDetector(
+                              onTap: _toggleSidebar,
+                              child: Container(
+                                color: Colors.black
+                                    .withValues(alpha: 0.42 * _sidebarCtrl.value),
+                              ),
+                            ),
+                          )
+                        : const SizedBox.shrink(),
                   ),
 
                   // Sliding sidebar overlay
-                  AnimatedBuilder(
-                    animation: _sidebarCtrl,
-                    builder: (_, child) {
-                      final t = Curves.easeOutCubic.transform(_sidebarCtrl.value);
-                      return Transform.translate(
-                        offset: Offset(-overlayWidth * (1 - t), 0),
-                        child: child,
-                      );
-                    },
-                    child: SizedBox(
-                      width: overlayWidth,
-                      height: totalH,
-                      child: Material(
-                        elevation: 14,
-                        color: T.s1,
-                        shadowColor: Colors.black.withValues(alpha: 0.6),
-                        child: SidebarWidget(onFileOpen: _openFile),
-                      ),
-                    ),
-                  ),
+                  _sidebarOpen || _sidebarCtrl.isAnimating
+                      ? AnimatedBuilder(
+                          animation: _sidebarCtrl,
+                          builder: (_, child) {
+                            final t = Curves.easeOutCubic.transform(_sidebarCtrl.value);
+                            return Transform.translate(
+                              offset: Offset(-overlayWidth * (1 - t), 0),
+                              child: child,
+                            );
+                          },
+                          child: SizedBox(
+                            width: overlayWidth,
+                            height: totalH,
+                            child: Material(
+                              elevation: 14,
+                              color: T.s1,
+                              shadowColor: Colors.black.withValues(alpha: 0.6),
+                              child: SidebarWidget(onFileOpen: _openFile),
+                            ),
+                          ),
+                        )
+                      : const SizedBox.shrink(),
                 ],
               );
             },
