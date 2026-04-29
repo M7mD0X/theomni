@@ -1,7 +1,7 @@
 name: omni_ide
 description: Mobile-native AI Development Environment
 publish_to: "none"
-version: 0.0.1+1
+version: 0.0.1+50
 
 environment:
   sdk: ">=3.4.0 <4.0.0"

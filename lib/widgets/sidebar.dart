@@ -612,7 +612,7 @@ class _FileExplorerTreeState extends State<FileExplorerTree> {
               if (_crumbs.isNotEmpty)
                 _TinyBtn(icon: Icons.arrow_back_rounded, onTap: _goUp)
               else
-                const SizedBox(width: 24),
+                const SizedBox(width: 20),
               const SizedBox(width: 4),
               Expanded(
                 child: Text(
@@ -621,15 +621,25 @@ class _FileExplorerTreeState extends State<FileExplorerTree> {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              _TinyBtn(
-                  icon: Icons.note_add_outlined,
-                  tip: 'New file',
-                  onTap: () => _newItem(isDir: false)),
-              _TinyBtn(
-                  icon: Icons.create_new_folder_outlined,
-                  tip: 'New folder',
-                  onTap: () => _newItem(isDir: true)),
-              _TinyBtn(icon: Icons.refresh_rounded, onTap: _load),
+              // Wrap action buttons in FittedBox to prevent overflow on narrow screens
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _TinyBtn(
+                        icon: Icons.note_add_outlined,
+                        tip: 'New file',
+                        onTap: () => _newItem(isDir: false)),
+                    _TinyBtn(
+                        icon: Icons.create_new_folder_outlined,
+                        tip: 'New folder',
+                        onTap: () => _newItem(isDir: true)),
+                    _TinyBtn(icon: Icons.refresh_rounded, onTap: _load),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
