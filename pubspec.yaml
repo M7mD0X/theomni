@@ -1,7 +1,7 @@
 name: omni_ide
 description: Mobile-native AI Development Environment
 publish_to: "none"
-version: 0.0.1+50
+version: 0.1.0+0
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -16,7 +16,6 @@ dependencies:
   http: ^1.2.1
   dio: ^5.4.3
   provider: ^6.1.2
-  google_fonts: ^6.2.1
   flutter_highlight: ^0.7.0
   highlight: ^0.7.0
   path: ^1.9.0

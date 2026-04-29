@@ -459,7 +459,6 @@ class _GutterState extends State<_Gutter> {
   void initState() {
     super.initState();
     widget.ctrl.addListener(_update);
-    widget.scroll.addListener(_onScroll);
     _update();
   }
 
@@ -468,22 +467,14 @@ class _GutterState extends State<_Gutter> {
     if (n != _lines) setState(() => _lines = n);
   }
 
-  void _onScroll() {
-    if (mounted) setState(() {});
-  }
-
   @override
   void dispose() {
     widget.ctrl.removeListener(_update);
-    widget.scroll.removeListener(_onScroll);
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final scrollOffset =
-        widget.scroll.hasClients ? widget.scroll.offset : 0.0;
-
     return Container(
       width: 46,
       color: T.s1,

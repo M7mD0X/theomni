@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'theme/omni_theme.dart';
 import 'services/agent_service.dart';
@@ -15,9 +14,6 @@ void main() async {
     systemNavigationBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.light,
   ));
-
-  // Disable runtime font fetching — use bundled fonts only, no network jank
-  GoogleFonts.config.allowRuntimeFetching = false;
 
   final modeService = AppModeService();
   await modeService.load();

@@ -218,21 +218,10 @@ class _MainIDEScreenState extends State<MainIDEScreen>
               final editorH = totalH * _splitFraction;
               return Stack(
                 children: [
-                  // When agent panel is hidden, editor takes full height
-                  if (!_agentPanelVisible)
-                    SizedBox.expand(
-                      child: EditorView(
-                        files: _files,
-                        activeIndex: _activeFile,
-                        onTabTap: (i) => setState(() => _activeFile = i),
-                        onTabClose: _closeFile,
-                        onContentChanged: _handleContentChanged,
-                        saveNotifier: _saveNotifier,
-                      ),
-                    )
-                  else
-                    Column(
-                      children: [
+                  Column(
+                    children: [
+                      // Editor area
+                      if (_agentPanelVisible)
                         SizedBox(
                           height: editorH,
                           child: EditorView(
@@ -243,7 +232,63 @@ class _MainIDEScreenState extends State<MainIDEScreen>
                             onContentChanged: _handleContentChanged,
                             saveNotifier: _saveNotifier,
                           ),
+                        )
+                      else
+                        Expanded(
+                          child: EditorView(
+                            files: _files,
+                            activeIndex: _activeFile,
+                            onTabTap: (i) => setState(() => _activeFile = i),
+                            onTabClose: _closeFile,
+                            onContentChanged: _handleContentChanged,
+                            saveNotifier: _saveNotifier,
+                          ),
                         ),
+
+                      // Agent panel header bar (always visible — contains toggle arrow)
+                      Container(
+                        height: 36,
+                        color: T.s1,
+                        child: Row(
+                          children: [
+                            const SizedBox(width: T.s_4),
+                            Text(
+                              'AGENT',
+                              style: T.label(color: _agentPanelVisible ? T.accent : T.muted),
+                            ),
+                            const Spacer(),
+                            // Small arrow toggle button
+                            GestureDetector(
+                              onTap: _toggleAgentPanel,
+                              child: MouseRegion(
+                                cursor: SystemMouseCursors.click,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(T.r_sm),
+                                    color: _agentPanelVisible
+                                        ? Colors.transparent
+                                        : T.accentBg,
+                                  ),
+                                  child: Icon(
+                                    _agentPanelVisible
+                                        ? Icons.keyboard_arrow_down_rounded
+                                        : Icons.keyboard_arrow_up_rounded,
+                                    size: 20,
+                                    color: _agentPanelVisible ? T.dim : T.accent,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: T.s_2),
+                          ],
+                        ),
+                      ),
+
+                      // Agent panel content (only when visible)
+                      if (_agentPanelVisible) ...[
+                        Container(height: 1, color: T.border),
                         _SplitHandle(
                           onDrag: (dy) {
                             setState(() {
@@ -253,31 +298,11 @@ class _MainIDEScreenState extends State<MainIDEScreen>
                           },
                         ),
                         Expanded(
-                          child: Column(
-                            children: [
-                              Container(
-                                height: 36,
-                                color: T.s1,
-                                child: Row(
-                                  children: [
-                                    const SizedBox(width: T.s_4),
-                                    Text(
-                                      'AGENT',
-                                      style: T.label(color: T.accent),
-                                    ),
-                                    const Spacer(),
-                                  ],
-                                ),
-                              ),
-                              Container(height: 1, color: T.border),
-                              const Expanded(
-                                child: AgentPanel(key: ValueKey('a')),
-                              ),
-                            ],
-                          ),
+                          child: const AgentPanel(key: ValueKey('a')),
                         ),
                       ],
-                    ),
+                    ],
+                  ),
 
                   // Scrim behind the floating sidebar
                   // Only listen to animation while sidebar is transitioning
@@ -320,42 +345,6 @@ class _MainIDEScreenState extends State<MainIDEScreen>
                           ),
                         )
                       : const SizedBox.shrink(),
-
-                  // Floating toggle button for agent panel
-                  Positioned(
-                    bottom: 16,
-                    right: 16,
-                    child: GestureDetector(
-                      onTap: _toggleAgentPanel,
-                      child: AnimatedContainer(
-                        duration: T.dFast,
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: _agentPanelVisible ? T.s2 : T.accent,
-                          borderRadius: BorderRadius.circular(T.r_md),
-                          border: Border.all(
-                            color: _agentPanelVisible ? T.border : T.accent,
-                            width: 0.8,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.4),
-                              blurRadius: 8,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: Icon(
-                          _agentPanelVisible
-                              ? Icons.keyboard_arrow_down_rounded
-                              : Icons.smart_toy_rounded,
-                          size: 20,
-                          color: _agentPanelVisible ? T.dim : T.bg,
-                        ),
-                      ),
-                    ),
-                  ),
                 ],
               );
             },

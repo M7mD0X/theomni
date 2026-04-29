@@ -975,8 +975,9 @@ class _InputBarState extends State<_InputBar> {
 
   @override
   Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).padding.bottom;
     return Container(
-      padding: const EdgeInsets.fromLTRB(T.s_3, T.s_2, T.s_3, T.s_3),
+      padding: EdgeInsets.fromLTRB(T.s_3, T.s_2, T.s_3, T.s_3 + bottomInset),
       decoration: const BoxDecoration(
         color: T.s1,
         border: Border(top: BorderSide(color: T.border)),

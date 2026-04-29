@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 /// Omni-IDE design system.
 /// Aesthetic: "Editorial Terminal" — warm-tinted near-black canvas,
@@ -86,7 +85,8 @@ class T {
     FontStyle style = FontStyle.normal,
     double letterSpacing = -0.5,
   }) =>
-      GoogleFonts.fraunces(
+      TextStyle(
+        fontFamily: 'serif',
         fontSize: size,
         fontWeight: weight,
         color: color,
@@ -102,7 +102,7 @@ class T {
     double letterSpacing = 0,
     double height = 1.45,
   }) =>
-      GoogleFonts.interTight(
+      TextStyle(
         fontSize: size,
         fontWeight: weight,
         color: color,
@@ -116,7 +116,8 @@ class T {
     Color color = text,
     double height = 1.55,
   }) =>
-      GoogleFonts.jetBrainsMono(
+      TextStyle(
+        fontFamily: 'monospace',
         fontSize: size,
         fontWeight: weight,
         color: color,
@@ -127,7 +128,7 @@ class T {
     Color color = dim,
     double size = 10,
   }) =>
-      GoogleFonts.interTight(
+      TextStyle(
         fontSize: size,
         fontWeight: FontWeight.w700,
         color: color,

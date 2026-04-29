@@ -37,7 +37,7 @@ class _SidebarWidgetState extends State<SidebarWidget> {
           ),
           Container(width: 1, color: T.border),
           SizedBox(
-            width: 248,
+            width: 246,
             child: AnimatedSwitcher(
               duration: T.dMed,
               switchInCurve: T.eOut,
