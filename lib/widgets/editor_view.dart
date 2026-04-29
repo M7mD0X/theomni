@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import '../theme/omni_theme.dart';
 import '../services/native_file_service.dart';
 
@@ -207,7 +206,7 @@ class _EditorViewState extends State<EditorView> with WidgetsBindingObserver {
               builder: (_) => AlertDialog(
                 backgroundColor: T.s1,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(T.r_lg),
+                  borderRadius: BorderRadius.circular(T.rLg),
                   side: const BorderSide(color: T.border),
                 ),
                 title: const Text('File changed on disk'),
@@ -245,7 +244,6 @@ class _EditorViewState extends State<EditorView> with WidgetsBindingObserver {
       return const WelcomeView();
     }
     final active = widget.files[widget.activeIndex];
-    final dirty = _isDirty(active.path);
     return Column(
       children: [
         _TabStrip(
@@ -377,7 +375,7 @@ class _TabState extends State<_Tab> {
                   height: 16,
                   decoration: BoxDecoration(
                     color: _hover ? T.s3 : Colors.transparent,
-                    borderRadius: BorderRadius.circular(T.r_sm),
+                    borderRadius: BorderRadius.circular(T.rSm),
                   ),
                   child: Icon(
                     Icons.close_rounded,

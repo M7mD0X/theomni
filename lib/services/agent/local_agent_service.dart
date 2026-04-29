@@ -1,10 +1,10 @@
-/// Local-mode agent service — WebSocket bridge to the on-device agent.
-///
-/// Connects to `ws://localhost:8080` and runs the full agent loop with
-/// streaming tokens, tool calls, and shell output. Handles auto-retry
-/// with exponential backoff and proper cancellation.
-///
-/// Implements [AgentServiceInterface] so it can be swapped transparently.
+// Local-mode agent service — WebSocket bridge to the on-device agent.
+//
+// Connects to `ws://localhost:8080` and runs the full agent loop with
+// streaming tokens, tool calls, and shell output. Handles auto-retry
+// with exponential backoff and proper cancellation.
+//
+// Implements [AgentServiceInterface] so it can be swapped transparently.
 
 import 'dart:async';
 import 'dart:convert';
@@ -13,8 +13,11 @@ import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../agent_interface.dart';
 import '../settings_service.dart';
+import 'throttled_notifications.dart';
 
-class LocalAgentService extends ChangeNotifier implements AgentServiceInterface {
+class LocalAgentService extends ChangeNotifier
+    with ThrottledNotifications
+    implements AgentServiceInterface {
   final SettingsService _settings;
 
   static const agentUrl = 'http://localhost:8080';
@@ -40,32 +43,6 @@ class LocalAgentService extends ChangeNotifier implements AgentServiceInterface 
 
   String _streamingBuffer = '';
   int? _streamingMsgIndex;
-
-  // ── Throttled notifications ───────────────────────────────────────────────
-
-  Timer? _throttleTimer;
-  bool _hasPendingNotification = false;
-  static const _throttleDuration = Duration(milliseconds: 50);
-
-  void _throttledNotifyListeners() {
-    if (_throttleTimer?.isActive ?? false) {
-      _hasPendingNotification = true;
-      return;
-    }
-    notifyListeners();
-    _throttleTimer = Timer(_throttleDuration, () {
-      if (_hasPendingNotification) {
-        _hasPendingNotification = false;
-        notifyListeners();
-      }
-    });
-  }
-
-  void _flushNotifyListeners() {
-    _throttleTimer?.cancel();
-    _hasPendingNotification = false;
-    notifyListeners();
-  }
 
   // ── WebSocket ─────────────────────────────────────────────────────────────
 
@@ -228,7 +205,7 @@ class LocalAgentService extends ChangeNotifier implements AgentServiceInterface 
           final last = _messages.last;
           _messages[_messages.length - 1] =
               AgentMessage(role: 'tool_result', text: last.text + chunk);
-          _throttledNotifyListeners();
+          throttledNotifyListeners();
         } else {
           _addMessage(AgentMessage(role: 'tool_result', text: chunk));
         }
@@ -240,7 +217,7 @@ class LocalAgentService extends ChangeNotifier implements AgentServiceInterface 
         if (_streamingMsgIndex != null && _streamingBuffer == replyText) {
           _streamingMsgIndex = null;
           _streamingBuffer = '';
-          _flushNotifyListeners();
+          flushNotifyListeners();
         } else {
           if (_streamingMsgIndex != null) {
             _messages.removeAt(_streamingMsgIndex!);
@@ -268,7 +245,7 @@ class LocalAgentService extends ChangeNotifier implements AgentServiceInterface 
       _messages[_streamingMsgIndex!] =
           AgentMessage(role: 'agent', text: _streamingBuffer);
     }
-    _throttledNotifyListeners();
+    throttledNotifyListeners();
   }
 
   void _onDisconnected() {
@@ -341,19 +318,19 @@ class LocalAgentService extends ChangeNotifier implements AgentServiceInterface 
 
   void _addMessage(AgentMessage msg) {
     _messages.add(msg);
-    _flushNotifyListeners();
+    flushNotifyListeners();
   }
 
   void _setState(AgentState s, String text) {
     _state = s;
     _statusText = text;
-    _flushNotifyListeners();
+    flushNotifyListeners();
   }
 
   @override
   void dispose() {
     _cancelRetry();
-    _throttleTimer?.cancel();
+    cancelThrottledNotifications();
     _sub?.cancel();
     _channel?.sink.close();
     super.dispose();

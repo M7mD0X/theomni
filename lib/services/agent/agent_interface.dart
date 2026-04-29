@@ -5,7 +5,7 @@
 ///
 /// Extends [ChangeNotifier] so that any implementation can be used directly
 /// with Flutter's `Consumer<T>` / `context.watch<T>()` provider pattern.
-library;
+library agent_interface;
 
 import 'package:flutter/foundation.dart';
 

@@ -15,7 +15,7 @@
 /// final launcher = AgentLauncher(modeService);
 /// final result = await launcher.start(LaunchStrategy.termuxRun);
 /// ```
-library;
+library agent_launcher;
 
 import 'dart:async';
 import 'dart:io';

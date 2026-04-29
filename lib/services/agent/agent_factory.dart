@@ -1,4 +1,4 @@
-/// Agent factory — creates the appropriate agent service based on mode.
+// Agent factory — creates the appropriate agent service based on mode.
 ///
 /// This is the single entry point for obtaining an agent service instance.
 /// It returns either a [CloudAgentService] or [LocalAgentService] depending

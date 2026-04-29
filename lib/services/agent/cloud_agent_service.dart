@@ -1,10 +1,10 @@
-/// Cloud-mode agent service — direct API calls to AI providers.
-///
-/// This is a clean, focused implementation that only handles cloud mode.
-/// It streams SSE tokens in real-time, supports cancellation, and
-/// throttles UI updates for smooth rendering.
-///
-/// Implements [AgentServiceInterface] so it can be swapped transparently.
+// Cloud-mode agent service — direct API calls to AI providers.
+//
+// This is a clean, focused implementation that only handles cloud mode.
+// It streams SSE tokens in real-time, supports cancellation, and
+// throttles UI updates for smooth rendering.
+//
+// Implements [AgentServiceInterface] so it can be swapped transparently.
 
 import 'dart:async';
 import 'dart:convert';
@@ -12,8 +12,11 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import '../agent_interface.dart';
 import '../settings_service.dart';
+import 'throttled_notifications.dart';
 
-class CloudAgentService extends ChangeNotifier implements AgentServiceInterface {
+class CloudAgentService extends ChangeNotifier
+    with ThrottledNotifications
+    implements AgentServiceInterface {
   final SettingsService _settings;
 
   CloudAgentService(this._settings);
@@ -36,32 +39,6 @@ class CloudAgentService extends ChangeNotifier implements AgentServiceInterface 
 
   String _streamingBuffer = '';
   int? _streamingMsgIndex;
-
-  // ── Throttled notifications ───────────────────────────────────────────────
-
-  Timer? _throttleTimer;
-  bool _hasPendingNotification = false;
-  static const _throttleDuration = Duration(milliseconds: 50);
-
-  void _throttledNotifyListeners() {
-    if (_throttleTimer?.isActive ?? false) {
-      _hasPendingNotification = true;
-      return;
-    }
-    notifyListeners();
-    _throttleTimer = Timer(_throttleDuration, () {
-      if (_hasPendingNotification) {
-        _hasPendingNotification = false;
-        notifyListeners();
-      }
-    });
-  }
-
-  void _flushNotifyListeners() {
-    _throttleTimer?.cancel();
-    _hasPendingNotification = false;
-    notifyListeners();
-  }
 
   // ── Streaming HTTP ────────────────────────────────────────────────────────
 
@@ -215,7 +192,9 @@ class CloudAgentService extends ChangeNotifier implements AgentServiceInterface 
       try {
         final j = jsonDecode(errBody) as Map<String, dynamic>;
         errMsg = j['error']?['message'] ?? errMsg;
-      } catch {}
+      } catch (e) {
+        // JSON parse error — use raw error message
+      }
       throw Exception(errMsg);
     }
 
@@ -261,7 +240,9 @@ class CloudAgentService extends ChangeNotifier implements AgentServiceInterface 
               assembled += delta;
               _appendStreamingToken(delta);
             }
-          } catch {}
+          } catch (e) {
+            // Ignore malformed SSE data chunks
+          }
         }
       }
     }
@@ -272,7 +253,7 @@ class CloudAgentService extends ChangeNotifier implements AgentServiceInterface 
     if (_streamingMsgIndex != null) {
       _streamingMsgIndex = null;
       _streamingBuffer = '';
-      _flushNotifyListeners();
+      flushNotifyListeners();
     } else if (assembled.isNotEmpty) {
       _addMessage(AgentMessage(role: 'agent', text: assembled));
     }
@@ -287,7 +268,7 @@ class CloudAgentService extends ChangeNotifier implements AgentServiceInterface 
       _messages[_streamingMsgIndex!] =
           AgentMessage(role: 'agent', text: _streamingBuffer);
     }
-    _throttledNotifyListeners();
+    throttledNotifyListeners();
   }
 
   // ── Interface: Configuration ──────────────────────────────────────────────
@@ -332,18 +313,18 @@ class CloudAgentService extends ChangeNotifier implements AgentServiceInterface 
 
   void _addMessage(AgentMessage msg) {
     _messages.add(msg);
-    _flushNotifyListeners();
+    flushNotifyListeners();
   }
 
   void _setState(AgentState s, String text) {
     _state = s;
     _statusText = text;
-    _flushNotifyListeners();
+    flushNotifyListeners();
   }
 
   @override
   void dispose() {
-    _throttleTimer?.cancel();
+    cancelThrottledNotifications();
     _streamingClient?.close(force: true);
     super.dispose();
   }

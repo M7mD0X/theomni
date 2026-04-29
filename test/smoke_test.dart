@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:omni_ide/services/agent_service.dart';
+import 'package:omni_ide/services/agent/agent_interface.dart';
 import 'package:omni_ide/services/app_mode_service.dart';
 import 'package:omni_ide/services/settings_service.dart';
 import 'package:omni_ide/widgets/editor_view.dart';

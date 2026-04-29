@@ -233,7 +233,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   height: 36,
                   decoration: BoxDecoration(
                     color: T.s2,
-                    borderRadius: BorderRadius.circular(T.r_md),
+                    borderRadius: BorderRadius.circular(T.rMd),
                     border: Border.all(color: T.border),
                   ),
                   child: const Icon(Icons.arrow_back_rounded,
@@ -272,7 +272,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             padding: const EdgeInsets.all(T.s_3),
             decoration: BoxDecoration(
               color: T.s2,
-              borderRadius: BorderRadius.circular(T.r_md),
+              borderRadius: BorderRadius.circular(T.rMd),
               border: Border.all(color: T.border, width: 0.8),
             ),
             child: Column(
@@ -368,7 +368,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               padding: const EdgeInsets.all(T.s_3),
               decoration: BoxDecoration(
                 color: _ok ? T.sageBg : T.coralBg,
-                borderRadius: BorderRadius.circular(T.r_md),
+                borderRadius: BorderRadius.circular(T.rMd),
                 border: Border.all(
                   color:
                       _ok ? T.sage40 : T.coral40,
@@ -509,7 +509,7 @@ class _ProviderTileState extends State<_ProviderTile> {
               const EdgeInsets.symmetric(horizontal: T.s_4, vertical: T.s_3),
           decoration: BoxDecoration(
             color: sel ? T.accentBg : (_hover ? T.s2 : T.s1),
-            borderRadius: BorderRadius.circular(T.r_md),
+            borderRadius: BorderRadius.circular(T.rMd),
             border: Border.all(
               color: sel ? T.accent : (_hover ? T.borderHi : T.border),
               width: sel ? 1 : 0.8,
@@ -545,14 +545,11 @@ class _TextBox extends StatefulWidget {
   final String hint;
   final bool obscure;
   final Widget? suffix;
-  final Function(String)? onChanged;
-
   const _TextBox({
     required this.ctrl,
     required this.hint,
     this.obscure = false,
     this.suffix,
-    this.onChanged,
   });
 
   @override
@@ -580,7 +577,7 @@ class _TextBoxState extends State<_TextBox> {
       duration: T.dFast,
       decoration: BoxDecoration(
         color: T.s2,
-        borderRadius: BorderRadius.circular(T.r_md),
+        borderRadius: BorderRadius.circular(T.rMd),
         border: Border.all(
           color: focused ? T.accent : T.border,
           width: focused ? 1 : 0.8,
@@ -590,7 +587,6 @@ class _TextBoxState extends State<_TextBox> {
         controller: widget.ctrl,
         focusNode: _f,
         obscureText: widget.obscure,
-        onChanged: widget.onChanged,
         style: T.mono(size: 13, color: T.text),
         cursorColor: T.accent,
         decoration: InputDecoration(
@@ -629,7 +625,7 @@ class _ModelPicker extends StatelessWidget {
         height: 60,
         decoration: BoxDecoration(
           color: T.s2,
-          borderRadius: BorderRadius.circular(T.r_md),
+          borderRadius: BorderRadius.circular(T.rMd),
           border: Border.all(color: T.border, width: 0.8),
         ),
         child: Center(
@@ -655,7 +651,7 @@ class _ModelPicker extends StatelessWidget {
                 const EdgeInsets.symmetric(horizontal: T.s_3, vertical: T.s_3),
             decoration: BoxDecoration(
               color: T.s2,
-              borderRadius: BorderRadius.circular(T.r_md),
+              borderRadius: BorderRadius.circular(T.rMd),
               border: Border.all(color: T.border, width: 0.8),
             ),
             child: Row(
@@ -684,7 +680,7 @@ class _ModelPicker extends StatelessWidget {
       backgroundColor: T.s1,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(T.r_xl)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(T.rXl)),
       ),
       builder: (_) => _ModelSheet(
         models: models,
@@ -753,7 +749,7 @@ class _ModelSheetState extends State<_ModelSheet> {
             Container(
               decoration: BoxDecoration(
                 color: T.s2,
-                borderRadius: BorderRadius.circular(T.r_md),
+                borderRadius: BorderRadius.circular(T.rMd),
                 border: Border.all(color: T.border, width: 0.8),
               ),
               child: TextField(
@@ -781,14 +777,14 @@ class _ModelSheetState extends State<_ModelSheet> {
                   final sel = m == widget.value;
                   return InkWell(
                     onTap: () => widget.onPick(m),
-                    borderRadius: BorderRadius.circular(T.r_md),
+                    borderRadius: BorderRadius.circular(T.rMd),
                     child: Container(
                       margin: const EdgeInsets.only(bottom: 4),
                       padding: const EdgeInsets.symmetric(
                           horizontal: T.s_3, vertical: T.s_3),
                       decoration: BoxDecoration(
                         color: sel ? T.accentBg : T.s2,
-                        borderRadius: BorderRadius.circular(T.r_md),
+                        borderRadius: BorderRadius.circular(T.rMd),
                         border: Border.all(
                           color: sel ? T.accent : T.border,
                           width: 0.8,
@@ -845,7 +841,7 @@ class _GhostBtnState extends State<_GhostBtn> {
           padding: const EdgeInsets.symmetric(vertical: 14),
           decoration: BoxDecoration(
             color: _hover && en ? T.s2 : Colors.transparent,
-            borderRadius: BorderRadius.circular(T.r_md),
+            borderRadius: BorderRadius.circular(T.rMd),
             border: Border.all(
               color: en ? T.accent : T.border,
               width: 0.8,
@@ -889,7 +885,7 @@ class _SolidBtnState extends State<_SolidBtn> {
           padding: const EdgeInsets.symmetric(vertical: 14),
           decoration: BoxDecoration(
             color: widget.active ? T.sage : (_hover ? T.accentHi : T.accent),
-            borderRadius: BorderRadius.circular(T.r_md),
+            borderRadius: BorderRadius.circular(T.rMd),
             boxShadow: [
               BoxShadow(
                 color: widget.active ? T.sage40 : T.accent30,
@@ -947,6 +943,7 @@ class _ModeSection extends StatelessWidget {
                   if (!termux) {
                     await mode.refreshTermux();
                     if (!mode.termuxInstalled) {
+                      if (!context.mounted) return;
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           backgroundColor: T.s2,
@@ -971,7 +968,7 @@ class _ModeSection extends StatelessWidget {
                         horizontal: T.s_3, vertical: T.s_2),
                     decoration: BoxDecoration(
                       color: T.s2,
-                      borderRadius: BorderRadius.circular(T.r_md),
+                      borderRadius: BorderRadius.circular(T.rMd),
                       border: Border.all(color: T.border, width: 0.8),
                     ),
                     child: Row(
@@ -999,7 +996,7 @@ class _ModeSection extends StatelessWidget {
                         horizontal: T.s_3, vertical: T.s_2),
                     decoration: BoxDecoration(
                       color: T.accentBg,
-                      borderRadius: BorderRadius.circular(T.r_md),
+                      borderRadius: BorderRadius.circular(T.rMd),
                       border: Border.all(color: T.accent, width: 0.8),
                     ),
                     child: Row(
@@ -1067,7 +1064,7 @@ class _ModeTileState extends State<_ModeTile> {
             color: sel
                 ? T.accentBg
                 : (_hover && !widget.disabled ? T.s2 : T.s1),
-            borderRadius: BorderRadius.circular(T.r_md),
+            borderRadius: BorderRadius.circular(T.rMd),
             border: Border.all(
               color: sel
                   ? T.accent

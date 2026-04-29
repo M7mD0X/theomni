@@ -191,7 +191,7 @@ class _StatusPillState extends State<_StatusPill>
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         color: widget.active ? T.sageBg : T.s2,
-        borderRadius: BorderRadius.circular(T.r_pill),
+        borderRadius: BorderRadius.circular(T.rPill),
         border: Border.all(
           color: widget.active ? T.sage40 : T.border,
           width: 0.8,
@@ -284,7 +284,7 @@ class _IconBtnState extends State<_IconBtn> {
                   : (widget.highlighted
                       ? (_hover ? T.accentBg : T.s3)
                       : (_hover ? T.s3 : Colors.transparent)),
-              borderRadius: BorderRadius.circular(T.r_md),
+              borderRadius: BorderRadius.circular(T.rMd),
             ),
             child: Icon(
               widget.icon,

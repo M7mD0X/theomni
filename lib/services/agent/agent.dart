@@ -1,12 +1,13 @@
-/// Barrel export for the agent sub-package.
-///
-/// Import this single file to get the full agent architecture:
-/// ```dart
-/// import 'package:theomni/services/agent/agent.dart';
-/// ```
+// Barrel export for the agent sub-package.
+//
+// Import this single file to get the full agent architecture:
+// ```dart
+// import 'package:theomni/services/agent/agent.dart';
+// ```
 
 export 'agent_interface.dart';
 export 'agent_launcher.dart';
 export 'agent_factory.dart';
 export 'cloud_agent_service.dart';
 export 'local_agent_service.dart';
+export 'throttled_notifications.dart';

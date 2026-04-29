@@ -41,14 +41,14 @@ class T {
 
   // Pre-computed opacity variants (avoids withOpacity() in hot paths)
   // These are created once at class-load instead of per-frame allocations.
-  static final accent40 = const Color(0x66FFB347); // accent @ 40%
-  static final accent30 = const Color(0x4DFFB347); // accent @ 30%
-  static final accent12 = const Color(0x1EFFB347); // accent @ 12%
-  static final accent07 = const Color(0x12FFB347); // accent @ 7%
-  static final sage40 = const Color(0x668FB184); // sage @ 40%
-  static final sage60 = const Color(0x998FB184); // sage @ 60%
-  static final coral40 = const Color(0x66E86A5C); // coral @ 40%
-  static final slate30 = const Color(0x4D7FA6C7); // slate @ 30%
+  static const accent40 = Color(0x66FFB347); // accent @ 40%
+  static const accent30 = Color(0x4DFFB347); // accent @ 30%
+  static const accent12 = Color(0x1EFFB347); // accent @ 12%
+  static const accent07 = Color(0x12FFB347); // accent @ 7%
+  static const sage40 = Color(0x668FB184); // sage @ 40%
+  static const sage60 = Color(0x998FB184); // sage @ 60%
+  static const coral40 = Color(0x66E86A5C); // coral @ 40%
+  static const slate30 = Color(0x4D7FA6C7); // slate @ 30%
 
   // Syntax-ish file type colors (muted, not lurid)
   static const dartC = Color(0xFF7FA6C7);
@@ -72,11 +72,11 @@ class T {
   static const s_7 = 48.0;
 
   // ── Radii ──────────────────────────────────────────────────────────────
-  static const r_sm = 4.0;
-  static const r_md = 8.0;
-  static const r_lg = 12.0;
-  static const r_xl = 16.0;
-  static const r_pill = 999.0;
+  static const rSm = 4.0;
+  static const rMd = 8.0;
+  static const rLg = 12.0;
+  static const rXl = 16.0;
+  static const rPill = 999.0;
 
   // ── Motion ─────────────────────────────────────────────────────────────
   static const dFast = Duration(milliseconds: 140);

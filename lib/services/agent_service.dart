@@ -1,21 +1,20 @@
-/// Agent service — thin facade that delegates to the correct implementation.
-///
-/// This class maintains backward compatibility with code that references
-/// `AgentService` directly (e.g., `Provider<AgentService>`). Internally it
-/// delegates to either [CloudAgentService] or [LocalAgentService] depending
-/// on the current mode, and swaps implementations when the mode changes.
-///
-/// New code should prefer depending on [AgentServiceInterface] for
-/// testability and loose coupling.
+// Agent service — thin facade that delegates to the correct implementation.
+//
+// This class maintains backward compatibility with code that references
+// `AgentService` directly (e.g., `Provider<AgentService>`). Internally it
+// delegates to either [CloudAgentService] or [LocalAgentService] depending
+// on the current mode, and swaps implementations when the mode changes.
+//
+// New code should prefer depending on [AgentServiceInterface] for
+// testability and loose coupling.
 
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'agent/agent_interface.dart';
 import 'agent/agent_launcher.dart';
+import 'agent/agent_bootstrap.dart';
 import 'agent/agent_factory.dart';
-import 'agent/cloud_agent_service.dart';
-import 'agent/local_agent_service.dart';
 import 'app_mode_service.dart';
 import 'settings_service.dart';
 
@@ -29,16 +28,18 @@ class AgentService extends ChangeNotifier implements AgentServiceInterface {
   /// The active backend — swapped when mode changes.
   AgentServiceInterface _backend;
 
-  /// Agent launcher for local-mode startup.
-  late final AgentLauncher _launcher;
+  /// Agent bootstrap for clean startup lifecycle.
+  late final AgentBootstrap _bootstrap;
 
   AgentService(this.modeService, this._settings)
       : _backend = AgentFactory.create(modeService, _settings) {
     modeService.addListener(_onModeChanged);
-    _launcher = AgentLauncher(modeService);
 
     // Forward notifications from the backend
     _backend.addListener(_forwardNotify);
+
+    // Initialize bootstrap
+    _bootstrap = AgentBootstrap(modeService, _settings);
   }
 
   void _forwardNotify() => notifyListeners();
@@ -61,10 +62,14 @@ class AgentService extends ChangeNotifier implements AgentServiceInterface {
     notifyListeners();
   }
 
-  // ── Launcher access ───────────────────────────────────────────────────────
+  // ── Bootstrap access ───────────────────────────────────────────────────────
+
+  /// Access the agent bootstrap for clean startup lifecycle management.
+  AgentBootstrap get bootstrap => _bootstrap;
 
   /// Access the agent launcher for starting the agent with multiple strategies.
-  AgentLauncher get launcher => _launcher;
+  /// Prefer using [bootstrap] for the simpler API.
+  AgentLauncher get launcher => _bootstrap.launcher;
 
   // ── Delegated interface ───────────────────────────────────────────────────
 

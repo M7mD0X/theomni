@@ -26,7 +26,7 @@ void main() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: modeService),
-        ChangeNotifierProvider.value(value: settingsService),
+        Provider.value(value: settingsService),
         ChangeNotifierProvider(
           create: (_) => AgentService(modeService, settingsService),
         ),

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../services/app_mode_service.dart';
-import '../services/agent_service.dart';
 import '../theme/omni_theme.dart';
 import '../widgets/top_bar.dart';
 import '../widgets/sidebar.dart';
@@ -144,7 +143,7 @@ class _MainIDEScreenState extends State<MainIDEScreen>
       builder: (_) => AlertDialog(
         backgroundColor: T.s1,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(T.r_lg),
+          borderRadius: BorderRadius.circular(T.rLg),
           side: const BorderSide(color: T.border),
         ),
         title: const Text('Unsaved changes', style: TextStyle(color: T.coral)),
@@ -270,7 +269,7 @@ class _MainIDEScreenState extends State<MainIDEScreen>
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 8, vertical: 4),
                                   decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(T.r_sm),
+                                    borderRadius: BorderRadius.circular(T.rSm),
                                     color: _agentPanelVisible
                                         ? Colors.transparent
                                         : T.accentBg,

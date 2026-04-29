@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../services/agent_service.dart';
 import '../services/agent/agent_launcher.dart';
+import '../services/agent/agent_bootstrap.dart';
 import '../services/agent/agent_interface.dart';
 import '../services/app_mode_service.dart';
 import '../theme/omni_theme.dart';
@@ -142,7 +143,7 @@ class _StatusStrip extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
             decoration: BoxDecoration(
               color: cloud ? T.s2 : T.accentBg,
-              borderRadius: BorderRadius.circular(T.r_pill),
+              borderRadius: BorderRadius.circular(T.rPill),
               border: Border.all(
                 color: cloud ? T.border : T.accent,
                 width: 0.8,
@@ -211,7 +212,7 @@ class _MiniBtnState extends State<_MiniBtn> {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
           decoration: BoxDecoration(
             color: _hover ? T.accentBg : Colors.transparent,
-            borderRadius: BorderRadius.circular(T.r_pill),
+            borderRadius: BorderRadius.circular(T.rPill),
             border: Border.all(
               color: _hover ? T.accent : T.border,
               width: 0.8,
@@ -436,7 +437,7 @@ class _DisconnectedViewState extends State<_DisconnectedView> {
                   horizontal: T.s_3, vertical: T.s_2),
               decoration: BoxDecoration(
                 color: _testOk ? T.s2 : T.coralBg,
-                borderRadius: BorderRadius.circular(T.r_md),
+                borderRadius: BorderRadius.circular(T.rMd),
                 border: Border(
                   left: BorderSide(
                       color: _testOk ? T.sage : T.coral, width: 2),
@@ -460,7 +461,7 @@ class _DisconnectedViewState extends State<_DisconnectedView> {
                         _launchResult == LaunchResult.alreadyRunning
                     ? T.s2
                     : T.coralBg,
-                borderRadius: BorderRadius.circular(T.r_md),
+                borderRadius: BorderRadius.circular(T.rMd),
                 border: Border(
                   left: BorderSide(
                       color: _launchResult == LaunchResult.started ||
@@ -529,7 +530,7 @@ class _LaunchButtonState extends State<_LaunchButton> {
             color: accent
                 ? (_hover && !disabled ? T.accentHi : T.accent)
                 : (_hover && !disabled ? T.s2 : T.s1),
-            borderRadius: BorderRadius.circular(T.r_md),
+            borderRadius: BorderRadius.circular(T.rMd),
             border: Border.all(
               color: accent
                   ? T.accent
@@ -590,7 +591,7 @@ class _CommandBoxState extends State<_CommandBox> {
               const EdgeInsets.symmetric(horizontal: T.s_3, vertical: T.s_3),
           decoration: BoxDecoration(
             color: T.s1,
-            borderRadius: BorderRadius.circular(T.r_md),
+            borderRadius: BorderRadius.circular(T.rMd),
             border: Border.all(
               color: _hover ? T.accent40 : T.border,
               width: 0.8,
@@ -617,7 +618,7 @@ class _CommandBoxState extends State<_CommandBox> {
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
                   color: _hover ? T.accent : T.s3,
-                  borderRadius: BorderRadius.circular(T.r_pill),
+                  borderRadius: BorderRadius.circular(T.rPill),
                   border: Border.all(
                     color: _hover ? T.accentHi : T.border,
                     width: 0.8,
@@ -684,7 +685,7 @@ class _GhostButtonState extends State<_GhostButton> {
             color: _hover && !disabled
                 ? T.accent12
                 : Colors.transparent,
-            borderRadius: BorderRadius.circular(T.r_pill),
+            borderRadius: BorderRadius.circular(T.rPill),
             border: Border.all(
               color: disabled
                   ? T.border
@@ -725,7 +726,7 @@ class _RetryCard extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: T.s_3, vertical: T.s_2),
       decoration: BoxDecoration(
         color: T.s1,
-        borderRadius: BorderRadius.circular(T.r_md),
+        borderRadius: BorderRadius.circular(T.rMd),
         border: Border.all(color: T.border, width: 0.8),
       ),
       child: Row(
@@ -758,7 +759,7 @@ class _RetryCard extends StatelessWidget {
               padding: const EdgeInsets.all(1.5),
               decoration: BoxDecoration(
                 color: agent.autoRetry ? T.accent : T.s3,
-                borderRadius: BorderRadius.circular(T.r_pill),
+                borderRadius: BorderRadius.circular(T.rPill),
               ),
               child: Align(
                 alignment: agent.autoRetry
@@ -806,7 +807,7 @@ class _Bubble extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: T.s_3, vertical: 8),
           decoration: BoxDecoration(
             color: T.slateBg,
-            borderRadius: BorderRadius.circular(T.r_md),
+            borderRadius: BorderRadius.circular(T.rMd),
             border: Border.all(color: T.slate30),
           ),
           child: Row(
@@ -834,7 +835,7 @@ class _Bubble extends StatelessWidget {
           padding: const EdgeInsets.all(T.s_3),
           decoration: BoxDecoration(
             color: T.s2,
-            borderRadius: BorderRadius.circular(T.r_md),
+            borderRadius: BorderRadius.circular(T.rMd),
             border: Border(
                 left: BorderSide(color: T.sage60, width: 2)),
           ),
@@ -850,7 +851,7 @@ class _Bubble extends StatelessWidget {
           padding: const EdgeInsets.all(T.s_3),
           decoration: BoxDecoration(
             color: T.coralBg,
-            borderRadius: BorderRadius.circular(T.r_md),
+            borderRadius: BorderRadius.circular(T.rMd),
             border: Border.all(color: T.coral40),
           ),
           child: Row(
@@ -876,10 +877,10 @@ class _Bubble extends StatelessWidget {
             decoration: BoxDecoration(
               color: T.s3,
               borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(T.r_lg),
-                topRight: Radius.circular(T.r_md),
-                bottomLeft: Radius.circular(T.r_lg),
-                bottomRight: Radius.circular(T.r_lg),
+                topLeft: Radius.circular(T.rLg),
+                topRight: Radius.circular(T.rMd),
+                bottomLeft: Radius.circular(T.rLg),
+                bottomRight: Radius.circular(T.rLg),
               ),
               border: Border.all(color: T.borderHi, width: 0.8),
             ),
@@ -1072,7 +1073,7 @@ class _SuggestionState extends State<_Suggestion> {
           padding: const EdgeInsets.symmetric(horizontal: T.s_3, vertical: 8),
           decoration: BoxDecoration(
             color: _hover ? T.accentBg : T.s2,
-            borderRadius: BorderRadius.circular(T.r_pill),
+            borderRadius: BorderRadius.circular(T.rPill),
             border: Border.all(
               color: _hover ? T.accent : T.border,
               width: 0.8,
@@ -1143,7 +1144,7 @@ class _InputBarState extends State<_InputBar> {
               duration: T.dFast,
               decoration: BoxDecoration(
                 color: T.s3,
-                borderRadius: BorderRadius.circular(T.r_lg),
+                borderRadius: BorderRadius.circular(T.rLg),
                 border: Border.all(
                   color: _focused ? T.accent30 : T.border,
                   width: 1,
@@ -1179,7 +1180,7 @@ class _InputBarState extends State<_InputBar> {
               height: 42,
               decoration: BoxDecoration(
                 color: _hasText && widget.enabled ? T.accent : T.s2,
-                borderRadius: BorderRadius.circular(T.r_lg),
+                borderRadius: BorderRadius.circular(T.rLg),
                 border: Border.all(
                   color: _hasText && widget.enabled ? T.accentHi : T.border,
                   width: 0.8,
