@@ -177,8 +177,12 @@ class _MainIDEScreenState extends State<MainIDEScreen>
     // Account for status bar in the app bar preferred size
     final topInset = MediaQuery.of(context).padding.top;
 
-    return WillPopScope(
-      onWillPop: _onWillPop,
+    return PopScope(
+      canPop: _dirtyFiles.isEmpty,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        await _onWillPop();
+      },
       child: Scaffold(
         backgroundColor: T.bg,
         resizeToAvoidBottomInset: false,

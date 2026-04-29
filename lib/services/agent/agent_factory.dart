@@ -1,0 +1,34 @@
+/// Agent factory — creates the appropriate agent service based on mode.
+///
+/// This is the single entry point for obtaining an agent service instance.
+/// It returns either a [CloudAgentService] or [LocalAgentService] depending
+/// on the current [AppMode], both implementing [AgentServiceInterface].
+///
+/// Usage:
+/// ```dart
+/// final agent = AgentFactory.create(mode, settings);
+/// ```
+
+import 'agent_interface.dart';
+import 'cloud_agent_service.dart';
+import 'local_agent_service.dart';
+import '../app_mode_service.dart';
+import '../settings_service.dart';
+
+class AgentFactory {
+  /// Create the right agent service for the current mode.
+  ///
+  /// - [AppMode.cloud] → [CloudAgentService] (direct API calls, no agent needed)
+  /// - [AppMode.local] → [LocalAgentService] (WebSocket to on-device agent)
+  static AgentServiceInterface create(
+    AppModeService mode,
+    SettingsService settings,
+  ) {
+    switch (mode.mode) {
+      case AppMode.cloud:
+        return CloudAgentService(settings);
+      case AppMode.local:
+        return LocalAgentService(settings);
+    }
+  }
+}

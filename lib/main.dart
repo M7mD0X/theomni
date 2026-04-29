@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'theme/omni_theme.dart';
 import 'services/agent_service.dart';
 import 'services/app_mode_service.dart';
+import 'services/settings_service.dart';
 import 'screens/main_ide_screen.dart';
 
 void main() async {
@@ -18,11 +19,17 @@ void main() async {
   final modeService = AppModeService();
   await modeService.load();
 
+  // Shared SettingsService — prevents duplicate instances
+  final settingsService = SettingsService();
+
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: modeService),
-        ChangeNotifierProvider(create: (_) => AgentService(modeService)),
+        ChangeNotifierProvider.value(value: settingsService),
+        ChangeNotifierProvider(
+          create: (_) => AgentService(modeService, settingsService),
+        ),
       ],
       child: const OmniApp(),
     ),
@@ -62,7 +69,6 @@ class _LaunchGateState extends State<_LaunchGate> {
   Future<void> _bootstrap() async {
     final mode = context.read<AppModeService>();
     if (!mode.firstLaunchDone) {
-      // Best-effort: ask once, create the OmniIDE folder, then move on.
       final hasPerm = await mode.hasStoragePermission();
       if (!hasPerm) {
         await mode.requestStoragePermission();
@@ -70,7 +76,6 @@ class _LaunchGateState extends State<_LaunchGate> {
       await mode.ensureWorkspace();
       await mode.markFirstLaunchDone();
     } else {
-      // Re-create folder in case the user deleted it.
       await mode.ensureWorkspace();
     }
     if (mounted) setState(() => _checking = false);

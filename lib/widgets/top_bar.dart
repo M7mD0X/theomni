@@ -193,7 +193,7 @@ class _StatusPillState extends State<_StatusPill>
         color: widget.active ? T.sageBg : T.s2,
         borderRadius: BorderRadius.circular(T.r_pill),
         border: Border.all(
-          color: widget.active ? T.sage.withOpacity(0.3) : T.border,
+          color: widget.active ? T.sage40 : T.border,
           width: 0.8,
         ),
       ),

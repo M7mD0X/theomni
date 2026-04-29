@@ -39,6 +39,17 @@ class T {
   static const sageBg = Color(0x148FB184);
   static const slateBg = Color(0x147FA6C7);
 
+  // Pre-computed opacity variants (avoids withOpacity() in hot paths)
+  // These are created once at class-load instead of per-frame allocations.
+  static final accent40 = const Color(0x66FFB347); // accent @ 40%
+  static final accent30 = const Color(0x4DFFB347); // accent @ 30%
+  static final accent12 = const Color(0x1EFFB347); // accent @ 12%
+  static final accent07 = const Color(0x12FFB347); // accent @ 7%
+  static final sage40 = const Color(0x668FB184); // sage @ 40%
+  static final sage60 = const Color(0x998FB184); // sage @ 60%
+  static final coral40 = const Color(0x66E86A5C); // coral @ 40%
+  static final slate30 = const Color(0x4D7FA6C7); // slate @ 30%
+
   // Syntax-ish file type colors (muted, not lurid)
   static const dartC = Color(0xFF7FA6C7);
   static const jsC = Color(0xFFE6C358);
@@ -155,7 +166,7 @@ class T {
       highlightColor: Colors.transparent,
       textSelectionTheme: const TextSelectionThemeData(
         cursorColor: accent,
-        selectionColor: Color(0x33FFB347),
+        selectionColor: accent12,
         selectionHandleColor: accent,
       ),
       textTheme: TextTheme(

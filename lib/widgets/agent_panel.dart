@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../services/agent_service.dart';
+import '../services/agent/agent_launcher.dart';
+import '../services/agent/agent_interface.dart';
 import '../services/app_mode_service.dart';
 import '../theme/omni_theme.dart';
 
@@ -129,14 +131,13 @@ class _StatusStrip extends StatelessWidget {
               shape: BoxShape.circle,
               color: color,
               boxShadow: connected
-                  ? [BoxShadow(color: color.withOpacity(0.4), blurRadius: 4)]
+                  ? [BoxShadow(color: T.sage40, blurRadius: 4)]
                   : null,
             ),
           ),
           const SizedBox(width: T.s_2),
           Text(agent.statusText, style: T.ui(size: 11, color: T.dim)),
           const SizedBox(width: 8),
-          // Mode badge
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
             decoration: BoxDecoration(
@@ -162,6 +163,13 @@ class _StatusStrip extends StatelessWidget {
                 label: 'connect',
                 onTap: () =>
                     context.read<AgentService>().connect(fromUser: true)),
+          if (agent.state == AgentState.thinking) ...[
+            _MiniBtn(
+              label: 'cancel',
+              onTap: () => context.read<AgentService>().cancelRequest(),
+            ),
+            const SizedBox(width: 6),
+          ],
           if (connected) ...[
             if (!cloud)
               _MiniBtn(
@@ -222,7 +230,7 @@ class _MiniBtnState extends State<_MiniBtn> {
   }
 }
 
-// ── Disconnected view (NEW: copy + test + auto-retry) ────────────────────
+// ── Disconnected view — with AgentLauncher integration ───────────────────
 class _DisconnectedView extends StatefulWidget {
   final AgentService agent;
   const _DisconnectedView({required this.agent});
@@ -235,6 +243,8 @@ class _DisconnectedViewState extends State<_DisconnectedView> {
   String? _testResult;
   bool _testing = false;
   bool _testOk = false;
+  bool _launching = false;
+  LaunchResult? _launchResult;
 
   Future<void> _copy() async {
     await Clipboard.setData(
@@ -254,14 +264,79 @@ class _DisconnectedViewState extends State<_DisconnectedView> {
       _testing = true;
       _testResult = null;
     });
-    final result = await widget.agent.ping();
+    final healthy = await widget.agent.healthCheck();
+    if (healthy) {
+      if (!mounted) return;
+      final pingResult = await widget.agent.ping();
+      setState(() {
+        _testing = false;
+        _testOk = true;
+        _testResult = 'reachable · ${pingResult ?? 'agent v7'}';
+      });
+      widget.agent.connect(fromUser: true);
+      return;
+    }
     if (!mounted) return;
     setState(() {
       _testing = false;
-      _testOk = result != null;
-      _testResult =
-          result != null ? 'reachable · $result' : 'unreachable on :8080';
+      _testOk = false;
+      _testResult = 'unreachable on :8080';
     });
+  }
+
+  /// Auto-start using the best available strategy.
+  Future<void> _autoStart() async {
+    setState(() {
+      _launching = true;
+      _launchResult = null;
+    });
+
+    final result = await widget.agent.launcher.startAuto();
+
+    if (!mounted) return;
+    setState(() {
+      _launching = false;
+      _launchResult = result;
+    });
+
+    if (result == LaunchResult.started || result == LaunchResult.alreadyRunning) {
+      widget.agent.connect(fromUser: true);
+    }
+  }
+
+  /// Start using a specific strategy.
+  Future<void> _startWith(LaunchStrategy strategy) async {
+    setState(() {
+      _launching = true;
+      _launchResult = null;
+    });
+
+    final result = await widget.agent.launcher.start(strategy);
+
+    if (!mounted) return;
+    setState(() {
+      _launching = false;
+      _launchResult = result;
+    });
+
+    if (result == LaunchResult.started || result == LaunchResult.alreadyRunning) {
+      widget.agent.connect(fromUser: true);
+    }
+  }
+
+  String _launchResultText(LaunchResult r) {
+    switch (r) {
+      case LaunchResult.started:
+        return 'Agent started successfully!';
+      case LaunchResult.alreadyRunning:
+        return 'Agent was already running';
+      case LaunchResult.strategyUnavailable:
+        return 'Strategy not available on this device';
+      case LaunchResult.failed:
+        return 'Agent started but didn\'t respond in time';
+      case LaunchResult.cancelled:
+        return 'Launch cancelled';
+    }
   }
 
   @override
@@ -278,7 +353,7 @@ class _DisconnectedViewState extends State<_DisconnectedView> {
           ),
           const SizedBox(height: 6),
           Text(
-            'start it in termux',
+            'start it up',
             style: T.display(
               size: 26,
               weight: FontWeight.w500,
@@ -288,12 +363,49 @@ class _DisconnectedViewState extends State<_DisconnectedView> {
           ),
           const SizedBox(height: T.s_4),
 
-          // Command box with copy
+          // ── Auto-start button (primary action) ────────────────────
+          _LaunchButton(
+            icon: Icons.play_arrow_rounded,
+            label: _launching ? 'starting...' : 'auto-start agent',
+            accent: true,
+            onTap: _launching ? null : _autoStart,
+          ),
+
+          const SizedBox(height: T.s_3),
+
+          // ── Alternative strategies ────────────────────────────────
+          Text('or try another way',
+              style: T.ui(size: 11, color: T.muted, letterSpacing: 1)),
+          const SizedBox(height: T.s_2),
+
+          Row(
+            children: [
+              Expanded(
+                child: _LaunchButton(
+                  icon: Icons.bolt_rounded,
+                  label: 'quick start',
+                  onTap: _launching ? null : () => _startWith(LaunchStrategy.quickStart),
+                ),
+              ),
+              const SizedBox(width: T.s_2),
+              Expanded(
+                child: _LaunchButton(
+                  icon: Icons.terminal_rounded,
+                  label: 'via Termux',
+                  onTap: _launching ? null : () => _startWith(LaunchStrategy.termuxRun),
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: T.s_3),
+
+          // ── Manual fallback ───────────────────────────────────────
           _CommandBox(command: AgentService.startCommand, onCopy: _copy),
 
           const SizedBox(height: T.s_3),
 
-          // Action row
+          // ── Action row ────────────────────────────────────────────
           Row(
             children: [
               _GhostButton(
@@ -338,29 +450,116 @@ class _DisconnectedViewState extends State<_DisconnectedView> {
             ),
           ],
 
+          if (_launchResult != null) ...[
+            const SizedBox(height: T.s_3),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: T.s_3, vertical: T.s_2),
+              decoration: BoxDecoration(
+                color: _launchResult == LaunchResult.started ||
+                        _launchResult == LaunchResult.alreadyRunning
+                    ? T.s2
+                    : T.coralBg,
+                borderRadius: BorderRadius.circular(T.r_md),
+                border: Border(
+                  left: BorderSide(
+                      color: _launchResult == LaunchResult.started ||
+                              _launchResult == LaunchResult.alreadyRunning
+                          ? T.sage
+                          : T.coral,
+                      width: 2),
+                ),
+              ),
+              child: Text(
+                _launchResultText(_launchResult!),
+                style: T.mono(
+                    size: 11,
+                    color: _launchResult == LaunchResult.started ||
+                            _launchResult == LaunchResult.alreadyRunning
+                        ? T.dim
+                        : T.coral,
+                    height: 1.4),
+              ),
+            ),
+          ],
+
           const SizedBox(height: T.s_5),
 
           // Auto-retry indicator
           _RetryCard(agent: agent),
-
-          const SizedBox(height: T.s_5),
-
-          // Help section
-          Text('first time?',
-              style: T.ui(size: 11, color: T.muted, letterSpacing: 1.5)),
-          const SizedBox(height: 6),
-          _HelpStep(
-              n: '1', text: 'install Termux from F-Droid (not Play Store)'),
-          _HelpStep(
-              n: '2',
-              text: 'run setup once:',
-              code:
-                  'curl -L https://raw.githubusercontent.com/.../setup_termux.sh | bash'),
-          _HelpStep(n: '3', text: 'then start the agent (command above)'),
-          _HelpStep(
-              n: '4',
-              text: 'come back here — it will auto-connect within seconds'),
         ],
+      ),
+    );
+  }
+}
+
+// ── Launch button (primary action) ───────────────────────────────────────
+class _LaunchButton extends StatefulWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+  final bool accent;
+  const _LaunchButton({
+    required this.icon,
+    required this.label,
+    this.onTap,
+    this.accent = false,
+  });
+
+  @override
+  State<_LaunchButton> createState() => _LaunchButtonState();
+}
+
+class _LaunchButtonState extends State<_LaunchButton> {
+  bool _hover = false;
+  @override
+  Widget build(BuildContext context) {
+    final disabled = widget.onTap == null;
+    final accent = widget.accent;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      cursor: disabled ? SystemMouseCursors.basic : SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: T.dFast,
+          padding: const EdgeInsets.symmetric(horizontal: T.s_4, vertical: T.s_3),
+          decoration: BoxDecoration(
+            color: accent
+                ? (_hover && !disabled ? T.accentHi : T.accent)
+                : (_hover && !disabled ? T.s2 : T.s1),
+            borderRadius: BorderRadius.circular(T.r_md),
+            border: Border.all(
+              color: accent
+                  ? T.accent
+                  : (disabled ? T.border : T.borderHi),
+              width: 0.8,
+            ),
+            boxShadow: accent && !disabled
+                ? [BoxShadow(color: T.accent30, blurRadius: 12, offset: const Offset(0, 2))]
+                : null,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(widget.icon,
+                  size: 16,
+                  color: accent
+                      ? T.bg
+                      : (disabled ? T.muted : T.accent)),
+              const SizedBox(width: 8),
+              Text(widget.label,
+                  style: T.ui(
+                    size: 12,
+                    color: accent
+                        ? T.bg
+                        : (disabled ? T.muted : T.text),
+                    weight: FontWeight.w600,
+                  )),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -393,7 +592,7 @@ class _CommandBoxState extends State<_CommandBox> {
             color: T.s1,
             borderRadius: BorderRadius.circular(T.r_md),
             border: Border.all(
-              color: _hover ? T.accent.withOpacity(0.6) : T.border,
+              color: _hover ? T.accent40 : T.border,
               width: 0.8,
             ),
           ),
@@ -483,7 +682,7 @@ class _GhostButtonState extends State<_GhostButton> {
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
             color: _hover && !disabled
-                ? color.withOpacity(0.12)
+                ? T.accent12
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(T.r_pill),
             border: Border.all(
@@ -582,52 +781,6 @@ class _RetryCard extends StatelessWidget {
   }
 }
 
-class _HelpStep extends StatelessWidget {
-  final String n;
-  final String text;
-  final String? code;
-  const _HelpStep({required this.n, required this.text, this.code});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 18,
-            alignment: Alignment.centerLeft,
-            child: Text(n,
-                style: T.display(
-                  size: 13,
-                  color: T.accent,
-                  style: FontStyle.italic,
-                )),
-          ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(text,
-                    style: T.ui(size: 12, color: T.dim, height: 1.5)),
-                if (code != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(code!,
-                        style:
-                            T.mono(size: 10.5, color: T.muted, height: 1.4)),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 // ── Message bubble ───────────────────────────────────────────────────────
 class _Bubble extends StatelessWidget {
   final AgentMessage msg;
@@ -654,7 +807,7 @@ class _Bubble extends StatelessWidget {
           decoration: BoxDecoration(
             color: T.slateBg,
             borderRadius: BorderRadius.circular(T.r_md),
-            border: Border.all(color: T.slate.withOpacity(0.3)),
+            border: Border.all(color: T.slate30),
           ),
           child: Row(
             children: [
@@ -683,7 +836,7 @@ class _Bubble extends StatelessWidget {
             color: T.s2,
             borderRadius: BorderRadius.circular(T.r_md),
             border: Border(
-                left: BorderSide(color: T.sage.withOpacity(0.6), width: 2)),
+                left: BorderSide(color: T.sage60, width: 2)),
           ),
           child: Text(
             msg.text,
@@ -698,7 +851,7 @@ class _Bubble extends StatelessWidget {
           decoration: BoxDecoration(
             color: T.coralBg,
             borderRadius: BorderRadius.circular(T.r_md),
-            border: Border.all(color: T.coral.withOpacity(0.4)),
+            border: Border.all(color: T.coral40),
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -837,7 +990,7 @@ class _ThinkingState extends State<_Thinking>
   }
 }
 
-// ── Empty state (when connected but no messages yet) ─────────────────────
+// ── Empty state ──────────────────────────────────────────────────────────
 class _EmptyState extends StatelessWidget {
   final AgentState state;
   final bool cloud;
@@ -992,7 +1145,7 @@ class _InputBarState extends State<_InputBar> {
                 color: T.s3,
                 borderRadius: BorderRadius.circular(T.r_lg),
                 border: Border.all(
-                  color: _focused ? T.accent.withOpacity(0.7) : T.border,
+                  color: _focused ? T.accent30 : T.border,
                   width: 1,
                 ),
               ),
@@ -1034,7 +1187,7 @@ class _InputBarState extends State<_InputBar> {
                 boxShadow: _hasText && widget.enabled
                     ? [
                         BoxShadow(
-                          color: T.accent.withOpacity(0.3),
+                          color: T.accent30,
                           blurRadius: 12,
                           offset: const Offset(0, 2),
                         ),

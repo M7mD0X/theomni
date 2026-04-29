@@ -371,7 +371,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 borderRadius: BorderRadius.circular(T.r_md),
                 border: Border.all(
                   color:
-                      _ok ? T.sage.withOpacity(0.4) : T.coral.withOpacity(0.4),
+                      _ok ? T.sage40 : T.coral40,
                 ),
               ),
               child: Row(
@@ -892,7 +892,7 @@ class _SolidBtnState extends State<_SolidBtn> {
             borderRadius: BorderRadius.circular(T.r_md),
             boxShadow: [
               BoxShadow(
-                color: (widget.active ? T.sage : T.accent).withOpacity(0.25),
+                color: widget.active ? T.sage40 : T.accent30,
                 blurRadius: 14,
                 offset: const Offset(0, 3),
               ),
