@@ -16,13 +16,8 @@ void main() async {
     statusBarIconBrightness: Brightness.light,
   ));
 
-  // Preload fonts to avoid runtime fetching jank on Android
+  // Disable runtime font fetching — use bundled fonts only, no network jank
   GoogleFonts.config.allowRuntimeFetching = false;
-  await Future.wait([
-    GoogleFonts.precache(GoogleFonts.fraunces()),
-    GoogleFonts.precache(GoogleFonts.interTight()),
-    GoogleFonts.precache(GoogleFonts.jetBrainsMono()),
-  ]);
 
   final modeService = AppModeService();
   await modeService.load();
