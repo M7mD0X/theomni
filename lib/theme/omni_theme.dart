@@ -72,11 +72,11 @@ class T {
   static const s_7 = 48.0;
 
   // ── Radii ──────────────────────────────────────────────────────────────
-  static const rSm = 4.0;
-  static const rMd = 8.0;
-  static const rLg = 12.0;
-  static const rXl = 16.0;
-  static const rPill = 999.0;
+  static const radiusSm = 4.0;
+  static const radiusMd = 8.0;
+  static const radiusLg = 12.0;
+  static const radiusXl = 16.0;
+  static const radiusPill = 999.0;
 
   // ── Motion ─────────────────────────────────────────────────────────────
   static const dFast = Duration(milliseconds: 140);
@@ -164,7 +164,7 @@ class T {
       dividerColor: border,
       splashFactory: NoSplash.splashFactory,
       highlightColor: Colors.transparent,
-      textSelectionTheme: const TextSelectionThemeData(
+      textSelectionTheme: TextSelectionThemeData(
         cursorColor: accent,
         selectionColor: accent12,
         selectionHandleColor: accent,

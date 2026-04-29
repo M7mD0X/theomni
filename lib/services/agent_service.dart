@@ -1,14 +1,5 @@
-// Agent service — thin facade that delegates to the correct implementation.
-//
-// This class maintains backward compatibility with code that references
-// `AgentService` directly (e.g., `Provider<AgentService>`). Internally it
-// delegates to either [CloudAgentService] or [LocalAgentService] depending
-// on the current mode, and swaps implementations when the mode changes.
-//
-// New code should prefer depending on [AgentServiceInterface] for
-// testability and loose coupling.
+/// Agent service — thin facade that delegates to the correct implementation.
 
-import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'agent/agent_interface.dart';

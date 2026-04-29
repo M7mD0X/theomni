@@ -1,10 +1,4 @@
-// Cloud-mode agent service — direct API calls to AI providers.
-//
-// This is a clean, focused implementation that only handles cloud mode.
-// It streams SSE tokens in real-time, supports cancellation, and
-// throttles UI updates for smooth rendering.
-//
-// Implements [AgentServiceInterface] so it can be swapped transparently.
+/// Cloud-mode agent service — direct API calls to AI providers.
 
 import 'dart:async';
 import 'dart:convert';
@@ -90,7 +84,14 @@ class CloudAgentService extends ChangeNotifier
     if (apiKey.isEmpty) {
       _addMessage(AgentMessage(
           role: 'error',
-          text: 'No API key set. Open Settings and add a key.'));
+          text: 'No API key configured. Tap Settings to add your key.'));
+      return;
+    }
+
+    if (model.isEmpty) {
+      _addMessage(AgentMessage(
+          role: 'error',
+          text: 'No model selected. Tap Settings to choose a model.'));
       return;
     }
 
@@ -121,7 +122,8 @@ class CloudAgentService extends ChangeNotifier
         _setState(AgentState.connected, 'Cloud Mode · ready');
         return;
       }
-      _addMessage(AgentMessage(role: 'error', text: 'AI Error: $e'));
+      final msg = _friendlyError(e.toString());
+      _addMessage(AgentMessage(role: 'error', text: msg));
       _setState(AgentState.connected, 'Cloud Mode · ready');
     }
   }
@@ -188,14 +190,7 @@ class CloudAgentService extends ChangeNotifier
     if (response.statusCode != 200) {
       final errBody = await response.transform(const Utf8Decoder()).join();
       client.close();
-      String errMsg = 'HTTP ${response.statusCode}';
-      try {
-        final j = jsonDecode(errBody) as Map<String, dynamic>;
-        errMsg = j['error']?['message'] ?? errMsg;
-      } catch (e) {
-        // JSON parse error — use raw error message
-      }
-      throw Exception(errMsg);
+      throw Exception(_parseHttpError(response.statusCode, errBody));
     }
 
     String assembled = '';
@@ -240,7 +235,7 @@ class CloudAgentService extends ChangeNotifier
               assembled += delta;
               _appendStreamingToken(delta);
             }
-          } catch (e) {
+          } catch (_) {
             // Ignore malformed SSE data chunks
           }
         }
@@ -320,6 +315,52 @@ class CloudAgentService extends ChangeNotifier
     _state = s;
     _statusText = text;
     flushNotifyListeners();
+  }
+
+  /// Convert raw error strings into user-friendly messages.
+  String _friendlyError(String raw) {
+    final lower = raw.toLowerCase();
+    if (lower.contains('socketexception') || lower.contains('connection refused')) {
+      return 'No internet connection. Check your network and try again.';
+    }
+    if (lower.contains('handshake') || lower.contains('certificate')) {
+      return 'Secure connection failed. Try again in a moment.';
+    }
+    if (lower.contains('timeout')) {
+      return 'Request timed out. The AI provider may be busy — try again.';
+    }
+    return raw.replaceAll('Exception: ', '');
+  }
+
+  /// Parse HTTP error responses into readable messages.
+  String _parseHttpError(int status, String body) {
+    try {
+      final j = jsonDecode(body) as Map<String, dynamic>;
+      final msg = j['error']?['message']?.toString();
+      if (msg != null && msg.isNotEmpty) {
+        // Shorten very long error messages
+        if (msg.length > 200) return '${msg.substring(0, 197)}...';
+        return msg;
+      }
+    } catch (_) {
+      // Not JSON — fall through
+    }
+    switch (status) {
+      case 401:
+        return 'Invalid API key. Check your key in Settings.';
+      case 403:
+        return 'Access denied. Your key may not have access to this model.';
+      case 404:
+        return 'Model not found. Pick a different model in Settings.';
+      case 429:
+        return 'Rate limited — too many requests. Wait a moment and try again.';
+      case 500:
+      case 502:
+      case 503:
+        return 'The AI provider is experiencing issues. Try again in a moment.';
+      default:
+        return 'Request failed ($status). Check your settings and try again.';
+    }
   }
 
   @override

@@ -206,7 +206,7 @@ class _EditorViewState extends State<EditorView> with WidgetsBindingObserver {
               builder: (_) => AlertDialog(
                 backgroundColor: T.s1,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(T.rLg),
+                  borderRadius: BorderRadius.circular(T.radiusLg),
                   side: const BorderSide(color: T.border),
                 ),
                 title: const Text('File changed on disk'),
@@ -375,7 +375,7 @@ class _TabState extends State<_Tab> {
                   height: 16,
                   decoration: BoxDecoration(
                     color: _hover ? T.s3 : Colors.transparent,
-                    borderRadius: BorderRadius.circular(T.rSm),
+                    borderRadius: BorderRadius.circular(T.radiusSm),
                   ),
                   child: Icon(
                     Icons.close_rounded,

@@ -143,7 +143,7 @@ class _MainIDEScreenState extends State<MainIDEScreen>
       builder: (_) => AlertDialog(
         backgroundColor: T.s1,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(T.rLg),
+          borderRadius: BorderRadius.circular(T.radiusLg),
           side: const BorderSide(color: T.border),
         ),
         title: const Text('Unsaved changes', style: TextStyle(color: T.coral)),
@@ -269,7 +269,7 @@ class _MainIDEScreenState extends State<MainIDEScreen>
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 8, vertical: 4),
                                   decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(T.rSm),
+                                    borderRadius: BorderRadius.circular(T.radiusSm),
                                     color: _agentPanelVisible
                                         ? Colors.transparent
                                         : T.accentBg,

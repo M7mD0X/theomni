@@ -1,10 +1,4 @@
-// Local-mode agent service — WebSocket bridge to the on-device agent.
-//
-// Connects to `ws://localhost:8080` and runs the full agent loop with
-// streaming tokens, tool calls, and shell output. Handles auto-retry
-// with exponential backoff and proper cancellation.
-//
-// Implements [AgentServiceInterface] so it can be swapped transparently.
+/// Local-mode agent service — WebSocket bridge to the on-device agent.
 
 import 'dart:async';
 import 'dart:convert';

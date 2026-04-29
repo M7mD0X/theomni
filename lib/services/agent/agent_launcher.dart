@@ -1,21 +1,4 @@
 /// Agent Launcher — Professional multi-strategy agent startup system.
-///
-/// Provides multiple ways to start the local agent, each with clear
-/// lifecycle management and error handling:
-///
-///   1. **Termux:Run** — Launch the agent directly from the app using
-///      the Termux:RunCommand plugin intent. Zero user interaction required.
-///   2. **Quick-start script** — A simplified one-liner that checks
-///      prerequisites and starts the agent in the background.
-///   3. **Manual** — The classic approach: copy the command, paste into
-///      Termux. Always available as a fallback.
-///
-/// Usage:
-/// ```dart
-/// final launcher = AgentLauncher(modeService);
-/// final result = await launcher.start(LaunchStrategy.termuxRun);
-/// ```
-library agent_launcher;
 
 import 'dart:async';
 import 'dart:io';

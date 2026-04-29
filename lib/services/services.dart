@@ -1,13 +1,4 @@
-// Barrel file for the services layer.
-//
-// Import this single file to get every service + the agent contract:
-//
-// ```dart
-// import 'package:theomni/services/services.dart';
-// ```
-//
-// Existing code that imports individual files directly (e.g.
-// `agent_service.dart`) continues to work unchanged.
+/// Barrel file for the services layer.
 
 export 'agent/agent_interface.dart';
 export 'agent/agent_launcher.dart';
@@ -20,3 +11,4 @@ export 'agent_service.dart';
 export 'app_mode_service.dart';
 export 'native_file_service.dart';
 export 'settings_service.dart';
+export 'syntax_highlight_service.dart';

@@ -2,9 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../services/agent_service.dart';
-import '../services/agent/agent_launcher.dart';
-import '../services/agent/agent_bootstrap.dart';
 import '../services/agent/agent_interface.dart';
+import '../services/agent/agent_bootstrap.dart';
 import '../services/app_mode_service.dart';
 import '../theme/omni_theme.dart';
 
@@ -64,42 +63,34 @@ class _AgentPanelState extends State<AgentPanel> {
       builder: (_, agent, __) {
         final modeSvc = context.watch<AppModeService>();
         final isCloud = modeSvc.mode == AppMode.cloud;
+        final isConnected = agent.state == AgentState.connected ||
+            agent.state == AgentState.thinking;
+
         return Column(
-        children: [
-          _StatusStrip(agent: agent, cloud: isCloud),
-          Expanded(
-            child: (!isCloud && agent.state == AgentState.disconnected)
-                ? _DisconnectedView(agent: agent)
-                : agent.messages.isEmpty
-                    ? _EmptyState(
-                        state: agent.state,
-                        cloud: isCloud,
-                        onSend: (q) {
-                          _input.text = q;
-                          _send();
-                        })
-                    : ListView.builder(
-                        controller: _scroll,
-                        padding: const EdgeInsets.fromLTRB(
-                            T.s_4, T.s_3, T.s_4, T.s_3),
-                        itemCount: agent.messages.length +
-                            (agent.state == AgentState.thinking ? 1 : 0),
-                        itemBuilder: (_, i) {
-                          if (agent.state == AgentState.thinking &&
-                              i == agent.messages.length) {
-                            return const _Thinking();
-                          }
-                          return _Bubble(msg: agent.messages[i]);
-                        },
-                      ),
-          ),
-          _InputBar(
-            ctrl: _input,
-            onSend: _send,
-            enabled: agent.state == AgentState.connected,
-          ),
-        ],
-      );
+          children: [
+            _StatusStrip(agent: agent, cloud: isCloud),
+            Expanded(
+              child: !isCloud && !isConnected
+                  ? _StartScreen(agent: agent)
+                  : agent.messages.isEmpty
+                      ? _EmptyState(
+                          cloud: isCloud,
+                          onSend: (q) {
+                            _input.text = q;
+                            _send();
+                          })
+                      : _MessageList(
+                          agent: agent,
+                          scrollController: _scroll,
+                        ),
+            ),
+            _InputBar(
+              ctrl: _input,
+              onSend: _send,
+              enabled: isConnected,
+            ),
+          ],
+        );
       },
     );
   }
@@ -143,14 +134,14 @@ class _StatusStrip extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
             decoration: BoxDecoration(
               color: cloud ? T.s2 : T.accentBg,
-              borderRadius: BorderRadius.circular(T.rPill),
+              borderRadius: BorderRadius.circular(T.radiusPill),
               border: Border.all(
                 color: cloud ? T.border : T.accent,
                 width: 0.8,
               ),
             ),
             child: Text(
-              cloud ? 'Cloud Mode' : 'Full Access Agent',
+              cloud ? 'Cloud' : 'Local',
               style: T.ui(
                   size: 9.5,
                   color: cloud ? T.muted : T.accent,
@@ -159,25 +150,14 @@ class _StatusStrip extends StatelessWidget {
             ),
           ),
           const Spacer(),
-          if (!cloud && agent.state == AgentState.disconnected)
-            _MiniBtn(
-                label: 'connect',
-                onTap: () =>
-                    context.read<AgentService>().connect(fromUser: true)),
           if (agent.state == AgentState.thinking) ...[
             _MiniBtn(
-              label: 'cancel',
+              label: 'stop',
               onTap: () => context.read<AgentService>().cancelRequest(),
             ),
             const SizedBox(width: 6),
           ],
           if (connected) ...[
-            if (!cloud)
-              _MiniBtn(
-                label: 'sync',
-                onTap: () => context.read<AgentService>().reloadConfig(),
-              ),
-            if (!cloud) const SizedBox(width: 6),
             _MiniBtn(
               label: 'clear',
               onTap: () => context.read<AgentService>().clearMessages(),
@@ -212,7 +192,7 @@ class _MiniBtnState extends State<_MiniBtn> {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
           decoration: BoxDecoration(
             color: _hover ? T.accentBg : Colors.transparent,
-            borderRadius: BorderRadius.circular(T.rPill),
+            borderRadius: BorderRadius.circular(T.radiusPill),
             border: Border.all(
               color: _hover ? T.accent : T.border,
               width: 0.8,
@@ -231,28 +211,71 @@ class _MiniBtnState extends State<_MiniBtn> {
   }
 }
 
-// ── Disconnected view — with AgentLauncher integration ───────────────────
-class _DisconnectedView extends StatefulWidget {
+// ── Start screen — simplified single-button design ───────────────────────
+class _StartScreen extends StatefulWidget {
   final AgentService agent;
-  const _DisconnectedView({required this.agent});
+  const _StartScreen({required this.agent});
 
   @override
-  State<_DisconnectedView> createState() => _DisconnectedViewState();
+  State<_StartScreen> createState() => _StartScreenState();
 }
 
-class _DisconnectedViewState extends State<_DisconnectedView> {
-  String? _testResult;
-  bool _testing = false;
-  bool _testOk = false;
+class _StartScreenState extends State<_StartScreen> {
   bool _launching = false;
-  LaunchResult? _launchResult;
+  String? _error;
 
-  Future<void> _copy() async {
-    await Clipboard.setData(
-        const ClipboardData(text: AgentService.startCommand));
-    if (!mounted) return;
+  Future<void> _start() async {
+    setState(() {
+      _launching = true;
+      _error = null;
+    });
+
+    try {
+      final result = await widget.agent.bootstrap.start();
+
+      if (!mounted) return;
+
+      switch (result) {
+        case BootstrapResult.ready:
+        case BootstrapResult.cloudReady:
+          await widget.agent.connect(fromUser: true);
+          break;
+        case BootstrapResult.failed:
+          setState(() {
+            _launching = false;
+            _error = 'Agent didn\'t respond. Make sure Termux is running and try again.';
+          });
+          break;
+        case BootstrapResult.termuxRequired:
+          setState(() {
+            _launching = false;
+            _error = 'Termux is required for local mode. Install it from F-Droid.';
+          });
+          break;
+        case BootstrapResult.manualRequired:
+          // Try to open Termux automatically
+          try {
+            await context.read<AppModeService>().openTermux();
+          } catch (_) {}
+          setState(() {
+            _launching = false;
+            _error = 'Open Termux and run: ~/omni-ide/start_agent.sh';
+          });
+          break;
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _launching = false;
+        _error = 'Failed to start: $e';
+      });
+    }
+  }
+
+  void _copyCommand() {
+    Clipboard.setData(const ClipboardData(text: AgentService.startCommand));
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text('Copied · paste into Termux',
+      content: Text('Copied to clipboard',
           style: T.ui(size: 12, color: T.text)),
       backgroundColor: T.s2,
       behavior: SnackBarBehavior.floating,
@@ -260,263 +283,142 @@ class _DisconnectedViewState extends State<_DisconnectedView> {
     ));
   }
 
-  Future<void> _testAgent() async {
-    setState(() {
-      _testing = true;
-      _testResult = null;
-    });
-    final healthy = await widget.agent.healthCheck();
-    if (healthy) {
-      if (!mounted) return;
-      final pingResult = await widget.agent.ping();
-      setState(() {
-        _testing = false;
-        _testOk = true;
-        _testResult = 'reachable · ${pingResult ?? 'agent v7'}';
-      });
-      widget.agent.connect(fromUser: true);
-      return;
-    }
-    if (!mounted) return;
-    setState(() {
-      _testing = false;
-      _testOk = false;
-      _testResult = 'unreachable on :8080';
-    });
-  }
-
-  /// Auto-start using the best available strategy.
-  Future<void> _autoStart() async {
-    setState(() {
-      _launching = true;
-      _launchResult = null;
-    });
-
-    final result = await widget.agent.launcher.startAuto();
-
-    if (!mounted) return;
-    setState(() {
-      _launching = false;
-      _launchResult = result;
-    });
-
-    if (result == LaunchResult.started || result == LaunchResult.alreadyRunning) {
-      widget.agent.connect(fromUser: true);
-    }
-  }
-
-  /// Start using a specific strategy.
-  Future<void> _startWith(LaunchStrategy strategy) async {
-    setState(() {
-      _launching = true;
-      _launchResult = null;
-    });
-
-    final result = await widget.agent.launcher.start(strategy);
-
-    if (!mounted) return;
-    setState(() {
-      _launching = false;
-      _launchResult = result;
-    });
-
-    if (result == LaunchResult.started || result == LaunchResult.alreadyRunning) {
-      widget.agent.connect(fromUser: true);
-    }
-  }
-
-  String _launchResultText(LaunchResult r) {
-    switch (r) {
-      case LaunchResult.started:
-        return 'Agent started successfully!';
-      case LaunchResult.alreadyRunning:
-        return 'Agent was already running';
-      case LaunchResult.strategyUnavailable:
-        return 'Strategy not available on this device';
-      case LaunchResult.failed:
-        return 'Agent started but didn\'t respond in time';
-      case LaunchResult.cancelled:
-        return 'Launch cancelled';
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final agent = widget.agent;
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(T.s_5, T.s_5, T.s_5, T.s_5),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'agent offline',
-            style: T.ui(size: 12, color: T.muted, letterSpacing: 2),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'start it up',
-            style: T.display(
-              size: 26,
-              weight: FontWeight.w500,
-              color: T.text,
-              style: FontStyle.italic,
-            ),
-          ),
-          const SizedBox(height: T.s_4),
-
-          // ── Auto-start button (primary action) ────────────────────
-          _LaunchButton(
-            icon: Icons.play_arrow_rounded,
-            label: _launching ? 'starting...' : 'auto-start agent',
-            accent: true,
-            onTap: _launching ? null : _autoStart,
-          ),
-
-          const SizedBox(height: T.s_3),
-
-          // ── Alternative strategies ────────────────────────────────
-          Text('or try another way',
-              style: T.ui(size: 11, color: T.muted, letterSpacing: 1)),
-          const SizedBox(height: T.s_2),
-
-          Row(
-            children: [
-              Expanded(
-                child: _LaunchButton(
-                  icon: Icons.bolt_rounded,
-                  label: 'quick start',
-                  onTap: _launching ? null : () => _startWith(LaunchStrategy.quickStart),
-                ),
-              ),
-              const SizedBox(width: T.s_2),
-              Expanded(
-                child: _LaunchButton(
-                  icon: Icons.terminal_rounded,
-                  label: 'via Termux',
-                  onTap: _launching ? null : () => _startWith(LaunchStrategy.termuxRun),
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: T.s_3),
-
-          // ── Manual fallback ───────────────────────────────────────
-          _CommandBox(command: AgentService.startCommand, onCopy: _copy),
-
-          const SizedBox(height: T.s_3),
-
-          // ── Action row ────────────────────────────────────────────
-          Row(
-            children: [
-              _GhostButton(
-                icon: Icons.flash_on_rounded,
-                label: 'connect now',
-                onTap: () => agent.connect(fromUser: true),
-              ),
-              const SizedBox(width: T.s_2),
-              _GhostButton(
-                icon: _testing
-                    ? Icons.hourglass_empty_rounded
-                    : (_testOk
-                        ? Icons.check_circle_outline_rounded
-                        : Icons.troubleshoot_rounded),
-                label: _testing ? 'testing…' : 'test agent',
-                onTap: _testing ? null : _testAgent,
-                accentColor: _testResult == null
-                    ? null
-                    : (_testOk ? T.sage : T.coral),
-              ),
-            ],
-          ),
-
-          if (_testResult != null) ...[
-            const SizedBox(height: T.s_3),
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: T.s_5, vertical: T.s_6),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // Agent icon
             Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: T.s_3, vertical: T.s_2),
+              width: 56,
+              height: 56,
               decoration: BoxDecoration(
-                color: _testOk ? T.s2 : T.coralBg,
-                borderRadius: BorderRadius.circular(T.rMd),
-                border: Border(
-                  left: BorderSide(
-                      color: _testOk ? T.sage : T.coral, width: 2),
-                ),
+                shape: BoxShape.circle,
+                color: T.accentBg,
+                border: Border.all(color: T.accent30, width: 1.5),
               ),
-              child: Text(
-                _testResult!,
-                style: T.mono(
-                    size: 11, color: _testOk ? T.dim : T.coral, height: 1.4),
+              child: const Icon(
+                Icons.smart_toy_outlined,
+                size: 26,
+                color: T.accent,
               ),
             ),
-          ],
+            const SizedBox(height: T.s_4),
 
-          if (_launchResult != null) ...[
-            const SizedBox(height: T.s_3),
-            Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: T.s_3, vertical: T.s_2),
-              decoration: BoxDecoration(
-                color: _launchResult == LaunchResult.started ||
-                        _launchResult == LaunchResult.alreadyRunning
-                    ? T.s2
-                    : T.coralBg,
-                borderRadius: BorderRadius.circular(T.rMd),
-                border: Border(
-                  left: BorderSide(
-                      color: _launchResult == LaunchResult.started ||
-                              _launchResult == LaunchResult.alreadyRunning
-                          ? T.sage
-                          : T.coral,
-                      width: 2),
-                ),
-              ),
-              child: Text(
-                _launchResultText(_launchResult!),
-                style: T.mono(
-                    size: 11,
-                    color: _launchResult == LaunchResult.started ||
-                            _launchResult == LaunchResult.alreadyRunning
-                        ? T.dim
-                        : T.coral,
-                    height: 1.4),
+            Text(
+              'agent offline',
+              style: T.ui(size: 12, color: T.muted, letterSpacing: 2),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'start to begin',
+              style: T.display(
+                size: 22,
+                weight: FontWeight.w500,
+                color: T.text,
+                style: FontStyle.italic,
               ),
             ),
+            const SizedBox(height: T.s_5),
+
+            // Primary start button
+            SizedBox(
+              width: double.infinity,
+              child: _PrimaryButton(
+                label: _launching ? 'starting...' : 'start agent',
+                icon: _launching ? null : Icons.play_arrow_rounded,
+                onTap: _launching ? null : _start,
+              ),
+            ),
+
+            if (_error != null) ...[
+              const SizedBox(height: T.s_4),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(T.s_3),
+                decoration: BoxDecoration(
+                  color: T.coralBg,
+                  borderRadius: BorderRadius.circular(T.radiusMd),
+                  border: Border.all(color: T.coral40),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.info_outline_rounded,
+                        size: 14, color: T.coral),
+                    const SizedBox(width: T.s_2),
+                    Expanded(
+                      child: Text(
+                        _error!,
+                        style: T.ui(size: 12, color: T.coral, height: 1.5),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Show copy command option when manual start is needed
+              if (_error!.contains('Termux') ||
+                  _error!.contains('start_agent')) ...[
+                const SizedBox(height: T.s_3),
+                GestureDetector(
+                  onTap: _copyCommand,
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: T.s_3, vertical: T.s_3),
+                    decoration: BoxDecoration(
+                      color: T.s2,
+                      borderRadius: BorderRadius.circular(T.radiusMd),
+                      border: Border.all(color: T.border, width: 0.8),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.copy_rounded,
+                            size: 13, color: T.dim),
+                        const SizedBox(width: T.s_2),
+                        Expanded(
+                          child: Text(
+                            '\$ ${AgentService.startCommand}',
+                            style: T.mono(size: 11, color: T.dim),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ],
-
-          const SizedBox(height: T.s_5),
-
-          // Auto-retry indicator
-          _RetryCard(agent: agent),
-        ],
+        ),
       ),
     );
   }
 }
 
-// ── Launch button (primary action) ───────────────────────────────────────
-class _LaunchButton extends StatefulWidget {
-  final IconData icon;
+// ── Primary button ───────────────────────────────────────────────────────
+class _PrimaryButton extends StatefulWidget {
   final String label;
+  final IconData? icon;
   final VoidCallback? onTap;
-  final bool accent;
-  const _LaunchButton({
-    required this.icon,
+  const _PrimaryButton({
     required this.label,
+    this.icon,
     this.onTap,
-    this.accent = false,
   });
 
   @override
-  State<_LaunchButton> createState() => _LaunchButtonState();
+  State<_PrimaryButton> createState() => _PrimaryButtonState();
 }
 
-class _LaunchButtonState extends State<_LaunchButton> {
+class _PrimaryButtonState extends State<_PrimaryButton> {
   bool _hover = false;
   @override
   Widget build(BuildContext context) {
     final disabled = widget.onTap == null;
-    final accent = widget.accent;
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
@@ -527,35 +429,42 @@ class _LaunchButtonState extends State<_LaunchButton> {
           duration: T.dFast,
           padding: const EdgeInsets.symmetric(horizontal: T.s_4, vertical: T.s_3),
           decoration: BoxDecoration(
-            color: accent
-                ? (_hover && !disabled ? T.accentHi : T.accent)
-                : (_hover && !disabled ? T.s2 : T.s1),
-            borderRadius: BorderRadius.circular(T.rMd),
+            color: disabled
+                ? T.s3
+                : (_hover ? T.accentHi : T.accent),
+            borderRadius: BorderRadius.circular(T.radiusMd),
             border: Border.all(
-              color: accent
-                  ? T.accent
-                  : (disabled ? T.border : T.borderHi),
+              color: disabled ? T.border : T.accent,
               width: 0.8,
             ),
-            boxShadow: accent && !disabled
+            boxShadow: !disabled
                 ? [BoxShadow(color: T.accent30, blurRadius: 12, offset: const Offset(0, 2))]
                 : null,
           ),
           child: Row(
-            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(widget.icon,
-                  size: 16,
-                  color: accent
-                      ? T.bg
-                      : (disabled ? T.muted : T.accent)),
-              const SizedBox(width: 8),
+              if (widget.icon != null) ...[
+                Icon(widget.icon,
+                    size: 18,
+                    color: disabled ? T.muted : T.bg),
+                const SizedBox(width: 8),
+              ],
+              if (widget.icon == null && disabled)
+                SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: T.muted,
+                  ),
+                ),
+              if (widget.icon == null && disabled)
+                const SizedBox(width: 8),
               Text(widget.label,
                   style: T.ui(
-                    size: 12,
-                    color: accent
-                        ? T.bg
-                        : (disabled ? T.muted : T.text),
+                    size: 13,
+                    color: disabled ? T.muted : T.bg,
                     weight: FontWeight.w600,
                   )),
             ],
@@ -566,218 +475,30 @@ class _LaunchButtonState extends State<_LaunchButton> {
   }
 }
 
-class _CommandBox extends StatefulWidget {
-  final String command;
-  final VoidCallback onCopy;
-  const _CommandBox({required this.command, required this.onCopy});
+// ── Message list ─────────────────────────────────────────────────────────
+class _MessageList extends StatelessWidget {
+  final AgentService agent;
+  final ScrollController scrollController;
 
-  @override
-  State<_CommandBox> createState() => _CommandBoxState();
-}
-
-class _CommandBoxState extends State<_CommandBox> {
-  bool _hover = false;
-  @override
-  Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: widget.onCopy,
-        child: AnimatedContainer(
-          duration: T.dFast,
-          padding:
-              const EdgeInsets.symmetric(horizontal: T.s_3, vertical: T.s_3),
-          decoration: BoxDecoration(
-            color: T.s1,
-            borderRadius: BorderRadius.circular(T.rMd),
-            border: Border.all(
-              color: _hover ? T.accent40 : T.border,
-              width: 0.8,
-            ),
-          ),
-          child: Row(
-            children: [
-              Text(
-                '\$',
-                style: T.mono(
-                    size: 13, color: T.accent, weight: FontWeight.w600),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: SelectableText(
-                  widget.command,
-                  style: T.mono(size: 13, color: T.text, height: 1.5),
-                ),
-              ),
-              const SizedBox(width: T.s_2),
-              AnimatedContainer(
-                duration: T.dFast,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: _hover ? T.accent : T.s3,
-                  borderRadius: BorderRadius.circular(T.rPill),
-                  border: Border.all(
-                    color: _hover ? T.accentHi : T.border,
-                    width: 0.8,
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.content_copy_rounded,
-                        size: 11, color: _hover ? T.bg : T.dim),
-                    const SizedBox(width: 5),
-                    Text('copy',
-                        style: T.ui(
-                          size: 10,
-                          color: _hover ? T.bg : T.dim,
-                          weight: FontWeight.w600,
-                          letterSpacing: 0.5,
-                        )),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _GhostButton extends StatefulWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback? onTap;
-  final Color? accentColor;
-  const _GhostButton({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.accentColor,
+  const _MessageList({
+    required this.agent,
+    required this.scrollController,
   });
 
   @override
-  State<_GhostButton> createState() => _GhostButtonState();
-}
-
-class _GhostButtonState extends State<_GhostButton> {
-  bool _hover = false;
-  @override
   Widget build(BuildContext context) {
-    final disabled = widget.onTap == null;
-    final color = widget.accentColor ?? T.accent;
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      cursor: disabled
-          ? SystemMouseCursors.basic
-          : SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: T.dFast,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: _hover && !disabled
-                ? T.accent12
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(T.rPill),
-            border: Border.all(
-              color: disabled
-                  ? T.border
-                  : (_hover ? color : T.borderHi),
-              width: 0.8,
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(widget.icon,
-                  size: 13, color: disabled ? T.muted : color),
-              const SizedBox(width: 6),
-              Text(widget.label,
-                  style: T.ui(
-                    size: 11.5,
-                    color: disabled ? T.muted : color,
-                    weight: FontWeight.w600,
-                    letterSpacing: 0.3,
-                  )),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _RetryCard extends StatelessWidget {
-  final AgentService agent;
-  const _RetryCard({required this.agent});
-
-  @override
-  Widget build(BuildContext context) {
-    final countdown = agent.retryCountdown;
-    final connecting = agent.state == AgentState.connecting;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: T.s_3, vertical: T.s_2),
-      decoration: BoxDecoration(
-        color: T.s1,
-        borderRadius: BorderRadius.circular(T.rMd),
-        border: Border.all(color: T.border, width: 0.8),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            agent.autoRetry
-                ? Icons.autorenew_rounded
-                : Icons.pause_circle_outline_rounded,
-            size: 13,
-            color: agent.autoRetry ? T.accent : T.muted,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              connecting
-                  ? 'connecting…'
-                  : agent.autoRetry
-                      ? (countdown > 0
-                          ? 'auto-retry in ${countdown}s'
-                          : 'auto-retry on')
-                      : 'auto-retry off',
-              style: T.ui(size: 11, color: T.dim),
-            ),
-          ),
-          GestureDetector(
-            onTap: () => agent.setAutoRetry(!agent.autoRetry),
-            child: Container(
-              width: 28,
-              height: 16,
-              padding: const EdgeInsets.all(1.5),
-              decoration: BoxDecoration(
-                color: agent.autoRetry ? T.accent : T.s3,
-                borderRadius: BorderRadius.circular(T.rPill),
-              ),
-              child: Align(
-                alignment: agent.autoRetry
-                    ? Alignment.centerRight
-                    : Alignment.centerLeft,
-                child: Container(
-                  width: 12,
-                  height: 12,
-                  decoration: const BoxDecoration(
-                    color: T.bg,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
+    return ListView.builder(
+      controller: scrollController,
+      padding: const EdgeInsets.fromLTRB(T.s_4, T.s_3, T.s_4, T.s_3),
+      itemCount: agent.messages.length +
+          (agent.state == AgentState.thinking ? 1 : 0),
+      itemBuilder: (_, i) {
+        if (agent.state == AgentState.thinking &&
+            i == agent.messages.length) {
+          return const _Thinking();
+        }
+        return _Bubble(msg: agent.messages[i]);
+      },
     );
   }
 }
@@ -804,10 +525,11 @@ class _Bubble extends StatelessWidget {
       case 'tool_call':
         return Container(
           margin: const EdgeInsets.only(bottom: 4),
-          padding: const EdgeInsets.symmetric(horizontal: T.s_3, vertical: 8),
+          padding:
+              const EdgeInsets.symmetric(horizontal: T.s_3, vertical: 8),
           decoration: BoxDecoration(
             color: T.slateBg,
-            borderRadius: BorderRadius.circular(T.rMd),
+            borderRadius: BorderRadius.circular(T.radiusMd),
             border: Border.all(color: T.slate30),
           ),
           child: Row(
@@ -835,9 +557,9 @@ class _Bubble extends StatelessWidget {
           padding: const EdgeInsets.all(T.s_3),
           decoration: BoxDecoration(
             color: T.s2,
-            borderRadius: BorderRadius.circular(T.rMd),
-            border: Border(
-                left: BorderSide(color: T.sage60, width: 2)),
+            borderRadius: BorderRadius.circular(T.radiusMd),
+            border:
+                Border(left: BorderSide(color: T.sage60, width: 2)),
           ),
           child: Text(
             msg.text,
@@ -851,17 +573,18 @@ class _Bubble extends StatelessWidget {
           padding: const EdgeInsets.all(T.s_3),
           decoration: BoxDecoration(
             color: T.coralBg,
-            borderRadius: BorderRadius.circular(T.rMd),
+            borderRadius: BorderRadius.circular(T.radiusMd),
             border: Border.all(color: T.coral40),
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.warning_amber_rounded, size: 14, color: T.coral),
+              const Icon(Icons.warning_amber_rounded,
+                  size: 14, color: T.coral),
               const SizedBox(width: T.s_2),
               Expanded(
-                child:
-                    Text(msg.text, style: T.ui(size: 12, color: T.coral)),
+                child: Text(msg.text,
+                    style: T.ui(size: 12, color: T.coral)),
               ),
             ],
           ),
@@ -872,15 +595,15 @@ class _Bubble extends StatelessWidget {
           alignment: Alignment.centerRight,
           child: Container(
             margin: const EdgeInsets.only(bottom: T.s_3, left: 40),
-            padding:
-                const EdgeInsets.symmetric(horizontal: T.s_3, vertical: T.s_2),
+            padding: const EdgeInsets.symmetric(
+                horizontal: T.s_3, vertical: T.s_2),
             decoration: BoxDecoration(
               color: T.s3,
               borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(T.rLg),
-                topRight: Radius.circular(T.rMd),
-                bottomLeft: Radius.circular(T.rLg),
-                bottomRight: Radius.circular(T.rLg),
+                topLeft: Radius.circular(T.radiusLg),
+                topRight: Radius.circular(T.radiusMd),
+                bottomLeft: Radius.circular(T.radiusLg),
+                bottomRight: Radius.circular(T.radiusLg),
               ),
               border: Border.all(color: T.borderHi, width: 0.8),
             ),
@@ -978,7 +701,7 @@ class _ThinkingState extends State<_Thinking>
                     height: 3.5,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: T.accent.withOpacity(op),
+                      color: T.accent.withValues(alpha: op),
                     ),
                   ),
                 );
@@ -993,26 +716,18 @@ class _ThinkingState extends State<_Thinking>
 
 // ── Empty state ──────────────────────────────────────────────────────────
 class _EmptyState extends StatelessWidget {
-  final AgentState state;
   final bool cloud;
   final Function(String) onSend;
   const _EmptyState({
-    required this.state,
     required this.onSend,
     this.cloud = false,
   });
 
-  static const _cloudPrompts = [
+  static const _prompts = [
     'explain a python decorator',
-    'write a debounce function in javascript',
-    'sketch a REST api for a todo app',
-    'compare sqlite vs postgres for a mobile app',
-  ];
-  static const _localPrompts = [
-    'write a hello world in python',
-    'show me all files in the project',
-    'create a simple express api',
-    'what is in README.md',
+    'write a debounce function in JS',
+    'sketch a REST API for a todo app',
+    'compare SQLite vs PostgreSQL',
   ];
 
   @override
@@ -1030,7 +745,7 @@ class _EmptyState extends StatelessWidget {
           Text(
             'build today?',
             style: T.display(
-              size: 32,
+              size: 28,
               weight: FontWeight.w500,
               color: T.text,
               style: FontStyle.italic,
@@ -1040,7 +755,7 @@ class _EmptyState extends StatelessWidget {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: (cloud ? _cloudPrompts : _localPrompts)
+            children: _prompts
                 .map((p) => _Suggestion(text: p, onTap: () => onSend(p)))
                 .toList(),
           ),
@@ -1070,10 +785,11 @@ class _SuggestionState extends State<_Suggestion> {
         onTap: widget.onTap,
         child: AnimatedContainer(
           duration: T.dFast,
-          padding: const EdgeInsets.symmetric(horizontal: T.s_3, vertical: 8),
+          padding:
+              const EdgeInsets.symmetric(horizontal: T.s_3, vertical: 8),
           decoration: BoxDecoration(
             color: _hover ? T.accentBg : T.s2,
-            borderRadius: BorderRadius.circular(T.rPill),
+            borderRadius: BorderRadius.circular(T.radiusPill),
             border: Border.all(
               color: _hover ? T.accent : T.border,
               width: 0.8,
@@ -1131,7 +847,8 @@ class _InputBarState extends State<_InputBar> {
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.of(context).padding.bottom;
     return Container(
-      padding: EdgeInsets.fromLTRB(T.s_3, T.s_2, T.s_3, T.s_3 + bottomInset),
+      padding:
+          EdgeInsets.fromLTRB(T.s_3, T.s_2, T.s_3, T.s_3 + bottomInset),
       decoration: const BoxDecoration(
         color: T.s1,
         border: Border(top: BorderSide(color: T.border)),
@@ -1144,7 +861,7 @@ class _InputBarState extends State<_InputBar> {
               duration: T.dFast,
               decoration: BoxDecoration(
                 color: T.s3,
-                borderRadius: BorderRadius.circular(T.rLg),
+                borderRadius: BorderRadius.circular(T.radiusLg),
                 border: Border.all(
                   color: _focused ? T.accent30 : T.border,
                   width: 1,
@@ -1159,8 +876,8 @@ class _InputBarState extends State<_InputBar> {
                 style: T.ui(size: 13, color: T.text),
                 decoration: InputDecoration(
                   hintText: widget.enabled
-                      ? 'describe what to build…'
-                      : 'start agent in Termux',
+                      ? 'describe what to build...'
+                      : 'start agent first',
                   hintStyle: T.ui(size: 13, color: T.muted),
                   border: InputBorder.none,
                   contentPadding: const EdgeInsets.symmetric(
@@ -1180,9 +897,10 @@ class _InputBarState extends State<_InputBar> {
               height: 42,
               decoration: BoxDecoration(
                 color: _hasText && widget.enabled ? T.accent : T.s2,
-                borderRadius: BorderRadius.circular(T.rLg),
+                borderRadius: BorderRadius.circular(T.radiusLg),
                 border: Border.all(
-                  color: _hasText && widget.enabled ? T.accentHi : T.border,
+                  color:
+                      _hasText && widget.enabled ? T.accentHi : T.border,
                   width: 0.8,
                 ),
                 boxShadow: _hasText && widget.enabled

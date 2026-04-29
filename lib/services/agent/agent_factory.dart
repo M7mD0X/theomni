@@ -1,13 +1,4 @@
-// Agent factory — creates the appropriate agent service based on mode.
-///
-/// This is the single entry point for obtaining an agent service instance.
-/// It returns either a [CloudAgentService] or [LocalAgentService] depending
-/// on the current [AppMode], both implementing [AgentServiceInterface].
-///
-/// Usage:
-/// ```dart
-/// final agent = AgentFactory.create(mode, settings);
-/// ```
+/// Agent factory — creates the appropriate agent service based on mode.
 
 import 'agent_interface.dart';
 import 'cloud_agent_service.dart';

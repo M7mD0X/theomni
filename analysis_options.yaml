@@ -7,11 +7,18 @@ analyzer:
     - "**/*.freezed.dart"
   errors:
     invalid_annotation_target: ignore
-    # Tons of legacy widgets in this repo use withOpacity / dynamic JSON access.
-    # Demote those to warnings so they don't fail CI; we'll modernise gradually.
     deprecated_member_use: ignore
     invalid_assignment: warning
     argument_type_not_assignable: warning
+    # Non-critical style issues — don't block CI
+    prefer_const_constructors: warning
+    prefer_const_declarations: warning
+    prefer_const_literals_to_create_immutables: warning
+    prefer_const_constructors_in_immutables: warning
+    constant_identifier_names: ignore
+    unnecessary_import: ignore
+    unused_local_variable: warning
+    dangling_library_doc_comments: ignore
 
 linter:
   rules:

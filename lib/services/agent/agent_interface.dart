@@ -1,11 +1,5 @@
 /// Agent service interface — defines the contract every agent backend must
-/// satisfy.  Consumers (widgets, screens) should depend on *this* type so
-/// swapping cloud / local / mock implementations requires zero changes
-/// downstream.
-///
-/// Extends [ChangeNotifier] so that any implementation can be used directly
-/// with Flutter's `Consumer<T>` / `context.watch<T>()` provider pattern.
-library agent_interface;
+/// satisfy.
 
 import 'package:flutter/foundation.dart';
 

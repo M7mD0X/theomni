@@ -521,7 +521,7 @@ class _FileExplorerTreeState extends State<FileExplorerTree> {
       builder: (_) => AlertDialog(
         backgroundColor: T.s1,
         shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(T.rLg),
+            borderRadius: BorderRadius.circular(T.radiusLg),
             side: const BorderSide(color: T.border)),
         title: Text(title, style: T.display(size: 18, color: T.text)),
         content: TextField(
@@ -561,7 +561,7 @@ class _FileExplorerTreeState extends State<FileExplorerTree> {
       builder: (_) => AlertDialog(
         backgroundColor: T.s1,
         shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(T.rLg),
+            borderRadius: BorderRadius.circular(T.radiusLg),
             side: const BorderSide(color: T.border)),
         title: Text(title, style: T.display(size: 17, color: T.coral)),
         content: Text(body, style: T.ui(size: 13, color: T.dim)),
@@ -762,7 +762,7 @@ class _RootChipState extends State<_RootChip> {
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
           decoration: BoxDecoration(
             color: widget.active ? T.accentBg : (_hover ? T.s3 : Colors.transparent),
-            borderRadius: BorderRadius.circular(T.rPill),
+            borderRadius: BorderRadius.circular(T.radiusPill),
             border: Border.all(
               color: widget.active ? T.accent : T.border,
               width: 0.8,
@@ -810,7 +810,7 @@ class _FileRowState extends State<_FileRow> {
         position.dx, position.dy, overlay.size.width - position.dx, 0,
       ),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(T.rMd),
+        borderRadius: BorderRadius.circular(T.radiusMd),
         side: const BorderSide(color: T.border),
       ),
       items: [
@@ -920,7 +920,7 @@ class _TinyBtnState extends State<_TinyBtn> {
           height: 26,
           decoration: BoxDecoration(
             color: _hover ? T.s3 : Colors.transparent,
-            borderRadius: BorderRadius.circular(T.rSm),
+            borderRadius: BorderRadius.circular(T.radiusSm),
           ),
           child: Icon(widget.icon, size: 13, color: _hover ? T.text : T.muted),
         ),
@@ -970,7 +970,7 @@ class _LoadingDotsState extends State<_LoadingDots>
                 height: 4,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: T.accent.withOpacity(op),
+                  color: T.accent.withValues(alpha: op),
                 ),
               ),
             );
@@ -1015,7 +1015,7 @@ class _ErrorState extends StatelessWidget {
                     const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                 decoration: BoxDecoration(
                   border: Border.all(color: T.accent),
-                  borderRadius: BorderRadius.circular(T.rPill),
+                  borderRadius: BorderRadius.circular(T.radiusPill),
                 ),
                 child: Text('retry',
                     style: T.ui(
@@ -1322,7 +1322,7 @@ class _SearchPaneState extends State<SearchPane> {
                           horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
                         color: T.accentBg,
-                        borderRadius: BorderRadius.circular(T.rPill),
+                        borderRadius: BorderRadius.circular(T.radiusPill),
                         border: Border.all(color: T.accent, width: 0.8),
                       ),
                       child: Text('search',

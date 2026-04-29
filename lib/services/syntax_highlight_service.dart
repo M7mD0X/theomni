@@ -10,7 +10,7 @@ class SyntaxHighlightService {
   // ── Colour map ──────────────────────────────────────────────────────────
 
   /// Tokens used by [_buildSpans].
-  static const _kColorMap = <_Token, Color>{
+  static final _kColorMap = <_Token, Color>{
     _Token.keyword: T.accent,
     _Token.string: T.sage,
     _Token.number: T.coral,

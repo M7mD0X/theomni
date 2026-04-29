@@ -120,7 +120,6 @@ void main() {
         name: 'b.dart',
         content: '',
       );
-      // These should not be reassignable — verified at compile time by `final`.
       expect(file.path, '/a/b.dart');
       expect(file.name, 'b.dart');
     });
@@ -135,7 +134,6 @@ void main() {
         ),
       );
 
-      // If we reach here without an exception, the widget rendered.
       expect(find.byType(WelcomeView), findsOneWidget);
     });
 
@@ -147,7 +145,6 @@ void main() {
       );
 
       expect(find.text('a pocket-sized'), findsOneWidget);
-      // 'development' is inside a RichText (TextSpan), not a Text widget.
       expect(
         find.byWidgetPredicate(
           (w) => w is RichText && w.text.toPlainText().contains('development'),
@@ -175,7 +172,6 @@ void main() {
         ),
       );
 
-      // The background uses a CustomPaint with _DotGrid.
       expect(find.byType(CustomPaint), findsWidgets);
     });
   });
@@ -208,7 +204,7 @@ void main() {
     });
   });
 
-  // ── 6. AgentState enum (bonus) ──────────────────────────────────────────
+  // ── 6. AgentState enum ──────────────────────────────────────────────────
   group('AgentState', () {
     test('has expected state values', () {
       expect(AgentState.values.length, 4);
@@ -220,7 +216,7 @@ void main() {
       ]));
     });
 
-    test('state order is disconnected → connecting → connected → thinking', () {
+    test('state order is disconnected -> connecting -> connected -> thinking', () {
       expect(AgentState.disconnected.index, 0);
       expect(AgentState.connecting.index, 1);
       expect(AgentState.connected.index, 2);
