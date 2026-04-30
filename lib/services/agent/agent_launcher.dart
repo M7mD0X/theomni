@@ -2,6 +2,7 @@
 
 import 'dart:async';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../app_mode_service.dart';
 
@@ -124,7 +125,9 @@ class AgentLauncher {
       if (result == true) {
         return _waitForHealthy();
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[AgentLauncher] Termux run strategy failed: $e');
+    }
     return LaunchResult.strategyUnavailable;
   }
 
@@ -139,7 +142,9 @@ class AgentLauncher {
       if (result == true) {
         return _waitForHealthy();
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[AgentLauncher] Quick start strategy failed: $e');
+    }
     return LaunchResult.strategyUnavailable;
   }
 
@@ -153,7 +158,8 @@ class AgentLauncher {
       final res = await req.close();
       client.close();
       return res.statusCode == 200;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[AgentLauncher] Health probe failed: $e');
       return false;
     }
   }

@@ -16,6 +16,7 @@ const { validateShellCommand } = require('./shell-validator');
 const { LRUCache } = require('./lru-cache');
 
 const MAX_ITER = 12;
+const MAX_SHELL_OUTPUT = 64 * 1024; // 64KB max shell output
 
 // ── Response cache — proper LRU with TTL ───────────────────────────────
 const _cache = new LRUCache({ maxSize: 64, ttlMs: 5 * 60 * 1000 });
@@ -91,10 +92,15 @@ async function executeTool(ws, tool, params, agentConfig) {
       const filePath = safe(params.path);
       const dir = path.dirname(filePath);
       await fsp.mkdir(dir, { recursive: true });
-      await fsp.writeFile(filePath, params.content ?? '', 'utf8');
+      const content = params.content ?? '';
+      // Input validation: limit content size to 10MB
+      if (Buffer.byteLength(content, 'utf8') > 10 * 1024 * 1024) {
+        return 'Error: file content exceeds 10MB limit';
+      }
+      await fsp.writeFile(filePath, content, 'utf8');
       // Invalidate system prompt cache since files changed
       invalidatePromptCache();
-      return `Wrote ${Buffer.byteLength(params.content ?? '', 'utf8')} bytes -> ${params.path}`;
+      return `Wrote ${Buffer.byteLength(content, 'utf8')} bytes -> ${params.path}`;
     }
 
     case 'patch_file': {
@@ -105,12 +111,32 @@ async function executeTool(ws, tool, params, agentConfig) {
       const replace = params.replace ?? '';
       if (!find) return `patch_file requires non-empty "find"`;
       if (!before.includes(find)) return `"find" string not found in ${params.path}`;
-      const after = params.all
-        ? before.split(find).join(replace)
-        : before.replace(find, replace);
+
+      let count;
+      let after;
+      if (params.all) {
+        // BUG-013 fix: handle empty find string and overlapping matches
+        if (find === '') {
+          return 'patch_file with "all" requires non-empty "find" string';
+        }
+        // Count occurrences before replacement
+        count = 0;
+        let searchFrom = 0;
+        while (true) {
+          const idx = before.indexOf(find, searchFrom);
+          if (idx === -1) break;
+          count++;
+          searchFrom = idx + find.length; // Non-overlapping: advance past the match
+        }
+        // Use split/join for replacement (non-overlapping)
+        after = before.split(find).join(replace);
+      } else {
+        count = 1;
+        after = before.replace(find, replace);
+      }
+
       await fsp.writeFile(filePath, after, 'utf8');
       invalidatePromptCache();
-      const count = params.all ? (before.split(find).length - 1) : 1;
       return `Patched ${params.path} (${count} replacement${count === 1 ? '' : 's'})`;
     }
 
@@ -195,12 +221,13 @@ async function executeTool(ws, tool, params, agentConfig) {
   }
 }
 
-// ── Live shell execution ───────────────────────────────────────────────
+// ── Live shell execution (BUG-012 fix: bounded output) ─────────────────
 function runShellLive(ws, cmd, cwd) {
   return new Promise((resolve) => {
     const proc = spawn('sh', ['-c', cmd], { cwd, env: process.env });
     let out = '';
     let killed = false;
+    let outputExceeded = false;
     const timer = setTimeout(() => {
       killed = true;
       try { proc.kill('SIGKILL'); } catch {}
@@ -208,18 +235,34 @@ function runShellLive(ws, cmd, cwd) {
 
     proc.stdout.on('data', (d) => {
       const s = d.toString('utf8');
+      // BUG-012 fix: truncate output as it accumulates instead of growing unbounded
+      if (out.length + s.length > MAX_SHELL_OUTPUT) {
+        out += s.slice(0, MAX_SHELL_OUTPUT - out.length);
+        outputExceeded = true;
+        try { proc.kill('SIGKILL'); } catch {}
+        clearTimeout(timer);
+        return;
+      }
       out += s;
       ws.send(JSON.stringify({ type: 'shell_chunk', chunk: s }));
-      if (out.length > 64 * 1024) { try { proc.kill('SIGKILL'); } catch {} }
     });
     proc.stderr.on('data', (d) => {
       const s = d.toString('utf8');
+      if (out.length + s.length > MAX_SHELL_OUTPUT) {
+        out += s.slice(0, MAX_SHELL_OUTPUT - out.length);
+        outputExceeded = true;
+        try { proc.kill('SIGKILL'); } catch {}
+        clearTimeout(timer);
+        return;
+      }
       out += s;
       ws.send(JSON.stringify({ type: 'shell_chunk', chunk: s, stream: 'err' }));
     });
     proc.on('close', (code) => {
       clearTimeout(timer);
-      const tail = killed ? '\n[killed: timeout or output limit]' : '';
+      const tail = killed ? '\n[killed: timeout or output limit]'
+        : outputExceeded ? '\n[output truncated: exceeded 64KB limit]'
+        : '';
       resolve(`(exit ${code})${tail}\n${out.slice(-4000)}`);
     });
     proc.on('error', (e) => {
@@ -300,6 +343,13 @@ function callAIStream(ws, system, messages, agentConfig) {
       let buffer = '';
       let assembled = '';
 
+      // BUG-004 fix: check cancellation immediately when response headers arrive
+      if (ws.__cancelled) {
+        try { req.destroy(); } catch {}
+        resolve('(cancelled)');
+        return;
+      }
+
       if (res.statusCode !== 200) {
         let err = '';
         res.on('data', c => err += c);
@@ -345,6 +395,17 @@ function callAIStream(ws, system, messages, agentConfig) {
       res.on('end', () => resolve(assembled || '(empty response)'));
       res.on('error', reject);
     });
+
+    // BUG-004 fix: check cancellation during connection establishment
+    req.on('socket', (socket) => {
+      socket.on('connect', () => {
+        if (ws.__cancelled) {
+          try { req.destroy(); } catch {}
+          resolve('(cancelled)');
+        }
+      });
+    });
+
     req.on('error', reject);
     req.write(body);
     req.end();
@@ -352,52 +413,72 @@ function callAIStream(ws, system, messages, agentConfig) {
 }
 
 // ── Main agent loop ───────────────────────────────────────────────────
+// ISSUE-006 fix: add a per-connection lock to prevent reentrancy
+const _activeLoops = new WeakMap();
+
 async function runAgentLoop(ws, userMessage, history, agentConfig) {
-  const SYSTEM = await buildSystemPrompt();
-  const messages = [...history, { role: 'user', content: userMessage }];
-
-  ws.send(JSON.stringify({ type: 'thinking', message: 'Thinking...' }));
-
-  for (let iter = 0; iter < MAX_ITER; iter++) {
-    if (ws.__cancelled) {
-      ws.send(JSON.stringify({ type: 'reply', message: '(cancelled)' }));
-      return;
-    }
-
-    let reply;
-    try {
-      reply = await callAIWithRetry(ws, SYSTEM, messages, agentConfig);
-    } catch (err) {
-      ws.send(JSON.stringify({ type: 'error', message: `AI Error: ${err.message}` }));
-      return;
-    }
-
-    const toolCall = parseTool(reply);
-    if (!toolCall) {
-      ws.send(JSON.stringify({ type: 'reply', message: reply }));
-      return;
-    }
-
-    ws.send(JSON.stringify({ type: 'tool_call', tool: toolCall.tool, params: toolCall.params }));
-
-    let observation;
-    try {
-      observation = await executeTool(ws, toolCall.tool, toolCall.params, agentConfig);
-    } catch (err) {
-      observation = `Error: ${err.message}`;
-    }
-
-    const obsPreview = String(observation).length > 600
-      ? String(observation).slice(0, 600) + `\n...(+${String(observation).length - 600} chars)`
-      : String(observation);
-
-    ws.send(JSON.stringify({ type: 'tool_result', tool: toolCall.tool, result: obsPreview }));
-
-    messages.push({ role: 'assistant', content: reply });
-    messages.push({ role: 'user', content: `Tool result for ${toolCall.tool}:\n${observation}` });
+  // ISSUE-006 fix: prevent concurrent agent loops on the same WebSocket
+  if (_activeLoops.get(ws)) {
+    ws.send(JSON.stringify({ type: 'error', message: 'Agent is already processing a message. Please wait.' }));
+    return;
   }
+  _activeLoops.set(ws, true);
 
-  ws.send(JSON.stringify({ type: 'reply', message: 'Reached max iteration limit. Try a more specific prompt.' }));
+  try {
+    const SYSTEM = await buildSystemPrompt();
+    const messages = [...history, { role: 'user', content: userMessage }];
+
+    ws.send(JSON.stringify({ type: 'thinking', message: 'Thinking...' }));
+
+    for (let iter = 0; iter < MAX_ITER; iter++) {
+      if (ws.__cancelled) {
+        ws.send(JSON.stringify({ type: 'reply', message: '(cancelled)' }));
+        return;
+      }
+
+      let reply;
+      try {
+        reply = await callAIWithRetry(ws, SYSTEM, messages, agentConfig);
+      } catch (err) {
+        ws.send(JSON.stringify({ type: 'error', message: `AI Error: ${err.message}` }));
+        return;
+      }
+
+      // Check cancellation after AI call
+      if (ws.__cancelled) {
+        ws.send(JSON.stringify({ type: 'reply', message: '(cancelled)' }));
+        return;
+      }
+
+      const toolCall = parseTool(reply);
+      if (!toolCall) {
+        ws.send(JSON.stringify({ type: 'reply', message: reply }));
+        return;
+      }
+
+      ws.send(JSON.stringify({ type: 'tool_call', tool: toolCall.tool, params: toolCall.params }));
+
+      let observation;
+      try {
+        observation = await executeTool(ws, toolCall.tool, toolCall.params, agentConfig);
+      } catch (err) {
+        observation = `Error: ${err.message}`;
+      }
+
+      const obsPreview = String(observation).length > 600
+        ? String(observation).slice(0, 600) + `\n...(+${String(observation).length - 600} chars)`
+        : String(observation);
+
+      ws.send(JSON.stringify({ type: 'tool_result', tool: toolCall.tool, result: obsPreview }));
+
+      messages.push({ role: 'assistant', content: reply });
+      messages.push({ role: 'user', content: `Tool result for ${toolCall.tool}:\n${observation}` });
+    }
+
+    ws.send(JSON.stringify({ type: 'reply', message: 'Reached max iteration limit. Try a more specific prompt.' }));
+  } finally {
+    _activeLoops.delete(ws);
+  }
 }
 
 module.exports = { runAgentLoop, parseTool, executeTool, callAIWithRetry, callAIStream };

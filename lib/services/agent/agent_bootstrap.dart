@@ -148,7 +148,8 @@ class AgentBootstrap {
       final res = await req.close();
       client.close();
       return res.statusCode == 200;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[AgentBootstrap] Health check failed: $e');
       return false;
     }
   }

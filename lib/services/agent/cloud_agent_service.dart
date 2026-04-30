@@ -114,6 +114,10 @@ class CloudAgentService extends ChangeNotifier
     const system =
         'You are Omni-IDE, a friendly AI coding assistant running inside an Android IDE. '
         'You are in Cloud Mode — you do NOT have file system or shell access. '
+        'You cannot read, write, or modify files, and you cannot execute shell commands. '
+        'If the user asks you to perform file operations or run commands, explain that '
+        'these features require Local Mode (Termux). You can still help with code '
+        'questions, explanations, and writing code snippets. '
         'Write clear, idiomatic code in fenced blocks and keep replies focused.';
 
     final messages = [
@@ -193,10 +197,11 @@ class CloudAgentService extends ChangeNotifier
     final client = HttpClient();
     _streamingClient = client;
 
+    final bodyBytes = utf8.encode(body);
     final request = await client.postUrl(url);
     headers.forEach((k, v) => request.headers.set(k, v));
-    request.headers.set('Content-Length', body.length.toString());
-    request.write(body);
+    request.headers.set('Content-Length', bodyBytes.length.toString());
+    request.add(bodyBytes);
 
     final response = await request.close();
 
@@ -250,8 +255,10 @@ class CloudAgentService extends ChangeNotifier
               assembled += delta;
               _appendStreamingToken(delta);
             }
-          } catch (_) {
-            // Ignore malformed SSE data chunks
+          } catch (e) {
+            // Ignore malformed SSE data chunks — these are expected
+            // from time to time with streaming responses
+            debugPrint('[CloudAgent] Malformed SSE chunk: $e');
           }
         }
       }
@@ -360,8 +367,9 @@ class CloudAgentService extends ChangeNotifier
         if (msg.length > 200) return '${msg.substring(0, 197)}...';
         return msg;
       }
-    } catch (_) {
+    } catch (e) {
       // Not JSON — fall through
+      debugPrint('[CloudAgent] Non-JSON error response: $e');
     }
     switch (status) {
       case 401:

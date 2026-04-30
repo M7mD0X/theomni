@@ -6,6 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const fsp = fs.promises;
+const readline = require('readline');
 
 const SKIP_DIRS = new Set([
   'node_modules', '.git', '.dart_tool', 'build', '.gradle', '.idea',
@@ -17,7 +18,9 @@ const MAX_SEARCH_FILE_SIZE = 512 * 1024; // 512 KB
 
 /**
  * Read directory entries asynchronously with stat info.
- * Returns { name, isDir, size, mtime }[].
+ * Returns { name, isDir, size, mtime, broken }[].
+ * BUG-014 fix: Broken symlinks are now flagged with `broken: true` and
+ * passed through so the Flutter side can visually distinguish them.
  */
 async function readDirStat(dirPath) {
   const names = await fsp.readdir(dirPath);
@@ -32,9 +35,24 @@ async function readDirStat(dirPath) {
           isDir: stat.isDirectory(),
           size: stat.isDirectory() ? null : stat.size,
           mtime: stat.mtimeMs,
+          broken: false,
         };
       } catch {
-        return { name, isDir: false, size: null, mtime: 0, broken: true };
+        // BUG-014 fix: Mark broken symlinks/files so Flutter can distinguish them
+        // Check if it's a broken symlink
+        let isBrokenSymlink = false;
+        try {
+          const lstat = await fsp.lstat(full);
+          isBrokenSymlink = lstat.isSymbolicLink();
+        } catch {}
+        return {
+          name,
+          isDir: false,
+          size: null,
+          mtime: 0,
+          broken: true,
+          isSymlink: isBrokenSymlink,
+        };
       }
     })
   );
@@ -46,6 +64,7 @@ async function readDirStat(dirPath) {
 /**
  * Async recursive file name search (glob/substring).
  * Returns relative paths from `rootDir`.
+ * PERF-002 fix: Uses parallel directory traversal for better performance.
  */
 async function findFiles(rootDir, pattern, workspace, { maxResults = 200 } = {}) {
   const pat = pattern.toLowerCase();
@@ -56,6 +75,9 @@ async function findFiles(rootDir, pattern, workspace, { maxResults = 200 } = {})
     if (hits.length >= maxResults) return;
     let entries;
     try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
+
+    // PERF-002 fix: Process directories in parallel instead of sequentially
+    const dirsToWalk = [];
     for (const e of entries) {
       if (hits.length >= maxResults) return;
       if (SKIP_DIRS.has(e.name)) continue;
@@ -63,7 +85,17 @@ async function findFiles(rootDir, pattern, workspace, { maxResults = 200 } = {})
       if (e.name.toLowerCase().includes(pat)) {
         hits.push(path.relative(workspace, full));
       }
-      if (e.isDirectory()) await walk(full);
+      if (e.isDirectory()) {
+        dirsToWalk.push(full);
+      }
+    }
+
+    // Walk directories in parallel with concurrency limit
+    const BATCH_SIZE = 4;
+    for (let i = 0; i < dirsToWalk.length; i += BATCH_SIZE) {
+      if (hits.length >= maxResults) return;
+      const batch = dirsToWalk.slice(i, i + BATCH_SIZE);
+      await Promise.all(batch.map(d => walk(d)));
     }
   }
 
@@ -74,6 +106,7 @@ async function findFiles(rootDir, pattern, workspace, { maxResults = 200 } = {})
 /**
  * Async recursive content search (grep).
  * Returns { path, absPath, line, preview }[].
+ * PERF-001 fix: Uses streaming line reader instead of reading entire files into memory.
  */
 async function grepFiles(rootDir, query, workspace, { maxResults = 100 } = {}) {
   let re;
@@ -86,34 +119,76 @@ async function grepFiles(rootDir, query, workspace, { maxResults = 100 } = {}) {
     if (hits.length >= maxResults) return;
     let entries;
     try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
+
+    const dirsToWalk = [];
     for (const e of entries) {
       if (hits.length >= maxResults) return;
       if (e.name.startsWith('.') && e.name !== '.env') continue;
       if (SKIP_DIRS.has(e.name)) continue;
       const full = path.join(dir, e.name);
-      if (e.isDirectory()) { await walk(full); continue; }
+      if (e.isDirectory()) {
+        dirsToWalk.push(full);
+        continue;
+      }
+
+      // Check file size before attempting to read
       let stat;
       try { stat = await fsp.stat(full); } catch { continue; }
       if (stat.size > MAX_SEARCH_FILE_SIZE) continue;
-      let content;
-      try { content = await fsp.readFile(full, 'utf8'); } catch { continue; }
-      if (content.indexOf('\u0000') !== -1) continue;
-      const lines = content.split('\n');
-      for (let i = 0; i < lines.length && hits.length < maxResults; i++) {
-        if (re.test(lines[i])) {
-          hits.push({
-            path: path.relative(workspace, full),
-            absPath: full,
-            line: i + 1,
-            preview: lines[i].trim().slice(0, 180),
-          });
-        }
-      }
+
+      // PERF-001 fix: Use streaming line reader instead of readFile + split
+      await grepFile(full, re, workspace, hits, maxResults);
+    }
+
+    // Walk directories in parallel with concurrency limit
+    const BATCH_SIZE = 4;
+    for (let i = 0; i < dirsToWalk.length; i += BATCH_SIZE) {
+      if (hits.length >= maxResults) return;
+      const batch = dirsToWalk.slice(i, i + BATCH_SIZE);
+      await Promise.all(batch.map(d => walk(d)));
     }
   }
 
   await walk(rootDir);
   return hits;
+}
+
+/**
+ * PERF-001 fix: Stream through a file line by line for grep matching.
+ * Avoids loading the entire file into memory.
+ */
+async function grepFile(filePath, re, workspace, hits, maxResults) {
+  return new Promise((resolve) => {
+    const relPath = path.relative(workspace, filePath);
+    let lineNum = 0;
+    let aborted = false;
+    const stream = fs.createReadStream(filePath, { encoding: 'utf8' });
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+    rl.on('line', (line) => {
+      if (aborted || hits.length >= maxResults) {
+        aborted = true;
+        rl.close();
+        stream.destroy();
+        return;
+      }
+      lineNum++;
+      if (re.test(line)) {
+        hits.push({
+          path: relPath,
+          absPath: filePath,
+          line: lineNum,
+          preview: line.trim().slice(0, 180),
+        });
+      }
+    });
+
+    rl.on('close', () => resolve());
+    stream.on('error', () => {
+      rl.close();
+      resolve();
+    });
+  });
 }
 
 /**

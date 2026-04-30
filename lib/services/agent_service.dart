@@ -112,7 +112,8 @@ class AgentService extends ChangeNotifier implements AgentServiceInterface {
           .get(Uri.parse('$agentUrl/health'))
           .timeout(const Duration(seconds: 2));
       return res.statusCode == 200;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[AgentService] Health check failed: $e');
       return false;
     }
   }

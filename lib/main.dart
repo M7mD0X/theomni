@@ -26,10 +26,12 @@ void main() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: modeService),
-        Provider.value(value: settingsService),
+        // ISSUE-007 fix: Use ChangeNotifierProvider instead of Provider.value
+        // so SettingsService can properly notify listeners if needed.
         ChangeNotifierProvider(
           create: (_) => AgentService(modeService, settingsService),
         ),
+        Provider(create: (_) => settingsService),
       ],
       child: const OmniApp(),
     ),

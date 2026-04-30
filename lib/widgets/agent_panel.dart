@@ -261,7 +261,9 @@ class _StartScreenState extends State<_StartScreen> {
           // Try to open Termux automatically
           try {
             await context.read<AppModeService>().openTermux();
-          } catch (_) {}
+          } catch (e) {
+            debugPrint('[AgentPanel] Failed to open Termux: $e');
+          }
           setState(() {
             _launching = false;
             _error = 'Open Termux and run: ~/omni-ide/start_agent.sh';

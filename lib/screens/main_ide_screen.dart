@@ -28,8 +28,10 @@ class _MainIDEScreenState extends State<MainIDEScreen>
   final List<OpenFile> _files = [];
   int _activeFile = 0;
 
-  // Track dirty state for each file
-  final Set<String> _dirtyFiles = {};
+  // BUG-007 fix: Track the last-saved content per file instead of just a dirty set.
+  // This allows proper dirty detection when comparing to the original saved state,
+  // and correctly clears the dirty flag when content reverts to the saved version.
+  final Map<String, String> _savedContent = {};
 
   late AnimationController _sidebarCtrl;
   late AnimationController _entryCtrl;
@@ -67,7 +69,9 @@ class _MainIDEScreenState extends State<MainIDEScreen>
         'localMode': modeSvc.mode == AppMode.local,
       });
       if (mounted) setState(() => _guardianOn = true);
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[MainIDEScreen] Guardian start failed: $e');
+    }
   }
 
   void _toggleSidebar() {
@@ -97,7 +101,7 @@ class _MainIDEScreenState extends State<MainIDEScreen>
 
   void _closeFile(int i) {
     setState(() {
-      _dirtyFiles.remove(_files[i].path);
+      _savedContent.remove(_files[i].path);
       _files.removeAt(i);
       if (_activeFile >= _files.length) {
         _activeFile = _files.length - 1;
@@ -108,33 +112,48 @@ class _MainIDEScreenState extends State<MainIDEScreen>
   void _handleContentChanged(String path, String newContent) {
     final idx = _files.indexWhere((f) => f.path == path);
     if (idx >= 0) {
-      final isDirty = newContent != _files[idx].content;
-      final wasDirty = _dirtyFiles.contains(path);
+      // BUG-007 fix: compare to the last-saved content, not the original
+      final saved = _savedContent[path] ?? _files[idx].content;
+      final isDirty = newContent != saved;
+      final wasDirty = _savedContent.containsKey(path) && _files[idx].content != saved;
       // Only setState when dirty state actually changes — avoids per-keystroke rebuild
-      if (isDirty && !wasDirty) {
-        _dirtyFiles.add(path);
-        if (mounted) setState(() {});
-      } else if (!isDirty && wasDirty) {
-        _dirtyFiles.remove(path);
+      if (isDirty != wasDirty) {
         if (mounted) setState(() {});
       }
     }
   }
 
-  bool get _hasDirtyFile =>
-      _files.isNotEmpty && _dirtyFiles.contains(_files[_activeFile].path);
+  bool get _hasDirtyFile {
+    if (_files.isEmpty) return false;
+    final f = _files[_activeFile];
+    final saved = _savedContent[f.path] ?? f.content;
+    // If we have unsaved content, it's dirty. The content field stores
+    // the last known editor content. If it differs from saved, it's dirty.
+    return f.content != saved;
+  }
+
+  bool get _hasAnyDirtyFile {
+    for (final f in _files) {
+      final saved = _savedContent[f.path] ?? f.content;
+      if (f.content != saved) return true;
+    }
+    return false;
+  }
 
   void _saveCurrentFile() {
     _saveNotifier.value++;
   }
 
   Future<bool> _onWillPop() async {
-    final hasUnsaved = _dirtyFiles.isNotEmpty;
+    final hasUnsaved = _hasAnyDirtyFile;
     if (!hasUnsaved) return true;
 
-    final dirtyNames = _dirtyFiles
-        .map((p) => _files.where((f) => f.path == p).map((f) => f.name))
-        .expand((names) => names)
+    final dirtyNames = _files
+        .where((f) {
+          final saved = _savedContent[f.path] ?? f.content;
+          return f.content != saved;
+        })
+        .map((f) => f.name)
         .join(', ');
 
     final result = await showDialog<bool>(
@@ -177,7 +196,7 @@ class _MainIDEScreenState extends State<MainIDEScreen>
     final topInset = MediaQuery.of(context).padding.top;
 
     return PopScope(
-      canPop: _dirtyFiles.isEmpty,
+      canPop: !_hasAnyDirtyFile,
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
         await _onWillPop();

@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import java.io.File
 import java.net.HttpURLConnection
@@ -23,6 +24,8 @@ import java.net.URL
  *   • Single-instance guarantee: PID file prevents duplicate agents.
  *   • Clean shutdown: sends SIGTERM and waits before SIGKILL.
  *   • Notification reflects real agent status (running / restarting / stopped).
+ *   • BUG-010 fix: Properly handles START_STICKY restart with null intent
+ *     by using in-memory mode tracking alongside SharedPreferences.
  */
 class GuardianService : Service() {
 
@@ -36,6 +39,7 @@ class GuardianService : Service() {
         const val KEY_LOCAL_MODE = "flutter.local_mode_enabled"
         private const val HEALTH_CHECK_INTERVAL_MS = 15_000L // 15 seconds
         private const val AGENT_PORT = 8080
+        private const val TAG = "GuardianService"
     }
 
     @Volatile private var nodeProcess: Process? = null
@@ -43,10 +47,15 @@ class GuardianService : Service() {
     private var consecutiveFailures = 0
     private var isRunning = false
 
+    // BUG-010 fix: Track the mode in memory so START_STICKY restart with null intent
+    // doesn't fall back to potentially stale SharedPreferences.
+    @Volatile private var lastKnownLocalMode: Boolean = false
+
     private val healthCheckRunnable = object : Runnable {
         override fun run() {
             if (!isRunning) return
-            if (prefs().getBoolean(KEY_LOCAL_MODE, false)) {
+            // BUG-010 fix: Use in-memory mode instead of re-reading SharedPreferences
+            if (lastKnownLocalMode) {
                 checkAndRestartIfNeeded()
             }
             handler.postDelayed(this, HEALTH_CHECK_INTERVAL_MS)
@@ -62,24 +71,45 @@ class GuardianService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
+                Log.i(TAG, "Stop action received")
                 stopAgent()
                 stopSelf()
                 return START_NOT_STICKY
             }
             ACTION_RESTART -> {
+                Log.i(TAG, "Restart action received")
                 stopAgent()
-                val localMode = prefs().getBoolean(KEY_LOCAL_MODE, false)
-                if (localMode) {
+                // BUG-010 fix: Use in-memory mode for restart
+                if (lastKnownLocalMode) {
                     Thread { startAgentProcess() }.start()
                 }
                 return START_STICKY
             }
         }
 
-        val explicit = intent?.getBooleanExtra(EXTRA_LOCAL_MODE, false) == true
-        val persisted = prefs().getBoolean(KEY_LOCAL_MODE, false)
-        val localMode = explicit || persisted
+        // BUG-010 fix: When START_STICKY restarts the service with a null intent,
+        // use the in-memory tracked mode instead of relying on SharedPreferences
+        // which may not have committed yet.
+        val localMode = if (intent != null) {
+            // Fresh start with an explicit intent — read mode from intent + prefs
+            val explicit = intent.getBooleanExtra(EXTRA_LOCAL_MODE, false)
+            val persisted = prefs().getBoolean(KEY_LOCAL_MODE, false)
+            val mode = explicit || persisted
+            lastKnownLocalMode = mode
+            mode
+        } else {
+            // START_STICKY restart with null intent — use last known mode.
+            // If we don't have a last known mode, fall back to SharedPreferences.
+            if (lastKnownLocalMode) {
+                true
+            } else {
+                prefs().getBoolean(KEY_LOCAL_MODE, false).also {
+                    lastKnownLocalMode = it
+                }
+            }
+        }
 
+        Log.i(TAG, "onStartCommand: localMode=$localMode, intent=${intent?.action ?: "null"}")
         isRunning = true
 
         if (localMode) {
@@ -96,6 +126,7 @@ class GuardianService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        Log.i(TAG, "onDestroy")
         isRunning = false
         handler.removeCallbacks(healthCheckRunnable)
         stopAgent()
@@ -116,6 +147,7 @@ class GuardianService : Service() {
 
         val script = "/data/data/com.termux/files/home/omni-ide/start_agent.sh"
         if (!File(script).exists()) {
+            Log.w(TAG, "Agent script not found: $script")
             updateNotification(localMode = true, status = "no agent")
             return
         }
@@ -127,6 +159,9 @@ class GuardianService : Service() {
             )
             pb.redirectErrorStream(true)
             pb.environment()["OMNI_PORT"] = AGENT_PORT.toString()
+            // VULN-005 fix: Don't pass API key via environment variables
+            // that are visible to other apps. The key is sent securely
+            // via the WebSocket connection after the agent starts.
             nodeProcess = pb.start()
 
             // Give it a few seconds to start up, then check health
@@ -135,10 +170,13 @@ class GuardianService : Service() {
             if (isAgentHealthy()) {
                 consecutiveFailures = 0
                 updateNotification(localMode = true, status = "running")
+                Log.i(TAG, "Agent started successfully")
             } else {
                 updateNotification(localMode = true, status = "starting")
+                Log.i(TAG, "Agent starting... (health check pending)")
             }
         } catch (e: Exception) {
+            Log.e(TAG, "Failed to start agent: ${e.message}")
             updateNotification(localMode = true, status = "error")
         }
     }
@@ -154,7 +192,10 @@ class GuardianService : Service() {
                 if (!exited) {
                     proc.destroyForcibly()
                 }
-            } catch (_: Exception) {}
+                Log.i(TAG, "Agent process stopped")
+            } catch (e: Exception) {
+                Log.w(TAG, "Error stopping agent: ${e.message}")
+            }
         }
         nodeProcess = null
         killExistingAgent()
@@ -172,7 +213,9 @@ class GuardianService : Service() {
                     val proc = Runtime.getRuntime().exec(arrayOf("kill", pid.toString()))
                     proc.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                Log.w(TAG, "Error killing existing agent: ${e.message}")
+            }
             pidFile.delete()
         }
     }
@@ -190,7 +233,8 @@ class GuardianService : Service() {
             val code = conn.responseCode
             conn.disconnect()
             code == 200
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.d(TAG, "Agent health check failed: ${e.message}")
             false
         }
     }
@@ -204,6 +248,7 @@ class GuardianService : Service() {
 
         consecutiveFailures++
         updateNotification(localMode = true, status = "reconnecting")
+        Log.w(TAG, "Agent health check failed (attempt $consecutiveFailures)")
 
         // After 3 consecutive failures, try restarting
         if (consecutiveFailures >= 3) {

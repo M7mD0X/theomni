@@ -17,6 +17,10 @@ class LocalAgentService extends ChangeNotifier
   static const agentUrl = 'http://localhost:8080';
   static const wsUrl = 'ws://localhost:8080';
 
+  // PERF-005 fix: Shared HTTP client with keep-alive for health checks and ping.
+  // Reusing connections avoids the overhead of creating a new client per request.
+  static final http.Client _httpClient = http.Client();
+
   LocalAgentService(this._settings);
 
   // ── Observable state ──────────────────────────────────────────────────────
@@ -43,6 +47,9 @@ class LocalAgentService extends ChangeNotifier
   WebSocketChannel? _channel;
   StreamSubscription? _sub;
 
+  // ── Connection lock (BUG-003 fix: prevents race condition) ────────────────
+  Completer<void>? _connectLock;
+
   // ── Auto-retry ────────────────────────────────────────────────────────────
 
   Timer? _retryTimer;
@@ -65,9 +72,19 @@ class LocalAgentService extends ChangeNotifier
 
   @override
   Future<void> connect({bool fromUser = false}) async {
+    // BUG-003 fix: Use a Completer as a mutex to prevent race conditions.
+    // If a connect is already in progress, wait for it to complete.
+    if (_connectLock != null && !_connectLock!.isCompleted) {
+      await _connectLock!.future;
+      return;
+    }
+
     if (_state == AgentState.connected || _state == AgentState.connecting) {
       return;
     }
+
+    _connectLock = Completer<void>();
+
     if (fromUser) {
       _retryAttempt = 0;
       _cancelRetry();
@@ -78,18 +95,25 @@ class LocalAgentService extends ChangeNotifier
       _sub = _channel!.stream.listen(
         _onMessage,
         onDone: _onDisconnected,
-        onError: (_) => _onDisconnected(),
+        onError: (error) {
+          debugPrint('[LocalAgentService] WebSocket error: $error');
+          _onDisconnected();
+        },
       );
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[LocalAgentService] Connection failed: $e');
       _setState(AgentState.disconnected, 'Connection failed');
       _scheduleRetry();
+    } finally {
+      _connectLock?.complete();
+      _connectLock = null;
     }
   }
 
   @override
   Future<String?> ping() async {
     try {
-      final res = await http
+      final res = await _httpClient
           .get(Uri.parse('$agentUrl/ping'))
           .timeout(const Duration(seconds: 4));
       if (res.statusCode == 200) {
@@ -98,18 +122,21 @@ class LocalAgentService extends ChangeNotifier
             data['agent']?.toString() ??
             'alive';
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[LocalAgentService] Ping failed: $e');
+    }
     return null;
   }
 
   @override
   Future<bool> healthCheck() async {
     try {
-      final res = await http
+      final res = await _httpClient
           .get(Uri.parse('$agentUrl/health'))
           .timeout(const Duration(seconds: 2));
       return res.statusCode == 200;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[LocalAgentService] Health check failed: $e');
       return false;
     }
   }
@@ -327,6 +354,10 @@ class LocalAgentService extends ChangeNotifier
     cancelThrottledNotifications();
     _sub?.cancel();
     _channel?.sink.close();
+    // Complete any pending connect lock to prevent hanging
+    if (_connectLock != null && !_connectLock!.isCompleted) {
+      _connectLock!.complete();
+    }
     super.dispose();
   }
 }
