@@ -45,10 +45,9 @@ class AgentService extends ChangeNotifier implements AgentServiceInterface {
     _backend = newBackend;
     _backend.addListener(_forwardNotify);
 
-    // Auto-connect in local mode
-    if (modeService.mode == AppMode.local) {
-      _backend.connect();
-    }
+    // Always connect the new backend — cloud mode is instant,
+    // local mode attempts WebSocket connection
+    _backend.connect();
 
     notifyListeners();
   }

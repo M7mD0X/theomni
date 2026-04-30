@@ -5,17 +5,10 @@
 // strategies, or health checks — just call [start()] and handle the result.
 //
 // The bootstrap process follows this flow:
-//   1. If agent is already healthy → return immediately
-//   2. If cloud mode → no startup needed
+//   1. If cloud mode → no startup needed
+//   2. If agent is already healthy → return immediately
 //   3. If local mode → try auto-launch (Termux:Run → Quick-start → Manual)
 //   4. Connect to the started agent
-//
-// Usage:
-// ```dart
-// final bootstrap = AgentBootstrap(modeService, agentService);
-// final result = await bootstrap.start();
-// // result is AgentState.connected on success
-// ```
 
 import 'dart:async';
 import 'dart:io';

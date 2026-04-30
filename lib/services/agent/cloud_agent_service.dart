@@ -1,4 +1,13 @@
 /// Cloud-mode agent service — direct API calls to AI providers.
+///
+/// This service works without any local agent or Termux. It calls
+/// AI providers directly over HTTPS using SSE streaming.
+///
+/// Connection flow:
+///   1. Call [connect()] → state becomes `connected` immediately
+///   2. User sends message → [sendMessage] calls the provider API
+///   3. Streaming tokens are displayed in real-time
+///   4. Errors are caught and shown as friendly messages
 
 import 'dart:async';
 import 'dart:convert';
@@ -21,7 +30,7 @@ class CloudAgentService extends ChangeNotifier
   @override
   AgentState get state => _state;
 
-  String _statusText = 'Cloud Mode · ready';
+  String _statusText = 'Cloud Mode \u00b7 ready';
   @override
   String get statusText => _statusText;
 
@@ -44,7 +53,8 @@ class CloudAgentService extends ChangeNotifier
   @override
   Future<void> connect({bool fromUser = false}) async {
     // Cloud mode is always "connected" — nothing to connect to.
-    _setState(AgentState.connected, 'Cloud Mode · ready');
+    // Just set the state and notify listeners.
+    _setState(AgentState.connected, 'Cloud Mode \u00b7 ready');
   }
 
   @override
@@ -61,7 +71,7 @@ class CloudAgentService extends ChangeNotifier
 
     final priorHistory = _messages
         .where((m) => m.role == 'user' || m.role == 'agent')
-        .map((m) => {
+        .map((m) => <String, String>{
               'role': m.role == 'agent' ? 'assistant' : 'user',
               'content': m.text,
             })
@@ -116,15 +126,15 @@ class CloudAgentService extends ChangeNotifier
         system: system,
         messages: messages,
       );
-      _setState(AgentState.connected, 'Cloud Mode · ready');
+      _setState(AgentState.connected, 'Cloud Mode \u00b7 ready');
     } catch (e) {
       if (_cancelled) {
-        _setState(AgentState.connected, 'Cloud Mode · ready');
+        _setState(AgentState.connected, 'Cloud Mode \u00b7 ready');
         return;
       }
       final msg = _friendlyError(e.toString());
       _addMessage(AgentMessage(role: 'error', text: msg));
-      _setState(AgentState.connected, 'Cloud Mode · ready');
+      _setState(AgentState.connected, 'Cloud Mode \u00b7 ready');
     }
   }
 
@@ -190,6 +200,7 @@ class CloudAgentService extends ChangeNotifier
     if (response.statusCode != 200) {
       final errBody = await response.transform(const Utf8Decoder()).join();
       client.close();
+      _streamingClient = null;
       throw Exception(_parseHttpError(response.statusCode, errBody));
     }
 
@@ -199,6 +210,7 @@ class CloudAgentService extends ChangeNotifier
     await for (final chunk in response.transform(const Utf8Decoder())) {
       if (_cancelled) {
         client.close();
+        _streamingClient = null;
         return;
       }
 
@@ -288,7 +300,7 @@ class CloudAgentService extends ChangeNotifier
       _streamingMsgIndex = null;
       _streamingBuffer = '';
     }
-    _setState(AgentState.connected, 'Cloud Mode · ready');
+    _setState(AgentState.connected, 'Cloud Mode \u00b7 ready');
   }
 
   // ── Interface: Retry (not applicable in cloud mode) ───────────────────────
@@ -320,7 +332,9 @@ class CloudAgentService extends ChangeNotifier
   /// Convert raw error strings into user-friendly messages.
   String _friendlyError(String raw) {
     final lower = raw.toLowerCase();
-    if (lower.contains('socketexception') || lower.contains('connection refused')) {
+    if (lower.contains('socketexception') ||
+        lower.contains('connection refused') ||
+        lower.contains('connection failed')) {
       return 'No internet connection. Check your network and try again.';
     }
     if (lower.contains('handshake') || lower.contains('certificate')) {
@@ -329,6 +343,7 @@ class CloudAgentService extends ChangeNotifier
     if (lower.contains('timeout')) {
       return 'Request timed out. The AI provider may be busy — try again.';
     }
+    // Strip the "Exception: " prefix for cleaner messages
     return raw.replaceAll('Exception: ', '');
   }
 

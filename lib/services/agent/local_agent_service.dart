@@ -123,7 +123,7 @@ class LocalAgentService extends ChangeNotifier
 
     final priorHistory = _messages
         .where((m) => m.role == 'user' || m.role == 'agent')
-        .map((m) => {
+        .map((m) => <String, String>{
               'role': m.role == 'agent' ? 'assistant' : 'user',
               'content': m.text,
             })

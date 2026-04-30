@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../theme/omni_theme.dart';
-import '../services/native_file_service.dart';
+import '../services/native_file_service.dart' show NativeFileService;
 
 class OpenFile {
   final String path;

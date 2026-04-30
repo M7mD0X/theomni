@@ -17,15 +17,18 @@ class AgentPanel extends StatefulWidget {
 class _AgentPanelState extends State<AgentPanel> {
   final _input = TextEditingController();
   final _scroll = ScrollController();
-  late AgentService _agent;
+  AgentService? _agent;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _agent = context.read<AgentService>();
-      _agent.addListener(_onUpdate);
-      _agent.connect();
+      if (!mounted) return;
+      final agent = context.read<AgentService>();
+      _agent = agent;
+      agent.addListener(_onUpdate);
+      // Always connect — cloud mode is instant, local mode tries WebSocket
+      agent.connect();
     });
   }
 
@@ -44,16 +47,18 @@ class _AgentPanelState extends State<AgentPanel> {
 
   @override
   void dispose() {
-    _agent.removeListener(_onUpdate);
+    _agent?.removeListener(_onUpdate);
     _input.dispose();
     _scroll.dispose();
     super.dispose();
   }
 
   void _send() {
+    final agent = _agent;
+    if (agent == null) return;
     final t = _input.text.trim();
     if (t.isEmpty) return;
-    _agent.sendMessage(t);
+    agent.sendMessage(t);
     _input.clear();
   }
 
@@ -87,7 +92,7 @@ class _AgentPanelState extends State<AgentPanel> {
             _InputBar(
               ctrl: _input,
               onSend: _send,
-              enabled: isConnected,
+              enabled: isCloud || isConnected,
             ),
           ],
         );
@@ -899,10 +904,9 @@ class _InputBarState extends State<_InputBar> {
                 color: _hasText && widget.enabled ? T.accent : T.s2,
                 borderRadius: BorderRadius.circular(T.radiusLg),
                 border: Border.all(
-                  color:
-                      _hasText && widget.enabled ? T.accentHi : T.border,
-                  width: 0.8,
-                ),
+                    color:
+                        _hasText && widget.enabled ? T.accentHi : T.border,
+                    width: 0.8),
                 boxShadow: _hasText && widget.enabled
                     ? [
                         BoxShadow(

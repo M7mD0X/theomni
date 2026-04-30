@@ -288,12 +288,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Cloud mode: Chat with AI directly. Read files on your device, but cannot write or run commands.',
+                  'Cloud mode: Chat with AI directly from your device. No setup needed — just add your API key and start chatting. Works with OpenRouter, OpenAI, and Anthropic.',
                   style: T.ui(size: 11, color: T.dim, height: 1.5),
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Full Access mode: Requires Termux installed (from F-Droid). Connects to a local agent that can read, write, and execute shell commands on your device.',
+                  'Full Access mode: Requires Termux (from F-Droid). Connects to a local agent that can read, write, and execute shell commands on your device. Run the setup command in Termux to get started.',
                   style: T.ui(size: 11, color: T.dim, height: 1.5),
                 ),
               ],
@@ -1008,6 +1008,42 @@ class _ModeSection extends StatelessWidget {
                           child: Text(
                             'open Termux & run ~/omni-ide/start_agent.sh',
                             style: T.mono(size: 11, color: T.accent),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: T.s_2),
+                GestureDetector(
+                  onTap: () {
+                    Clipboard.setData(const ClipboardData(
+                        text: 'bash <(curl -sL https://raw.githubusercontent.com/M7mD0X/theomni/main/scripts/setup_termux.sh)'));
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text('Setup command copied!',
+                          style: T.ui(size: 12, color: T.text)),
+                      backgroundColor: T.s2,
+                      behavior: SnackBarBehavior.floating,
+                      duration: const Duration(seconds: 2),
+                    ));
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: T.s_3, vertical: T.s_2),
+                    decoration: BoxDecoration(
+                      color: T.s2,
+                      borderRadius: BorderRadius.circular(T.radiusMd),
+                      border: Border.all(color: T.border, width: 0.8),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.copy_rounded,
+                            size: 13, color: T.dim),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'first time? copy setup command for Termux',
+                            style: T.ui(size: 11, color: T.dim),
                           ),
                         ),
                       ],
