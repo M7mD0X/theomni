@@ -12,6 +12,7 @@
 
 import 'dart:async';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../agent_interface.dart';
 import '../app_mode_service.dart';

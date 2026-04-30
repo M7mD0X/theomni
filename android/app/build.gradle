@@ -32,7 +32,7 @@ if (keystorePropertiesFile.exists() && keystorePropertiesFile.length() > 0) {
 
 android {
     namespace = "com.omniide.omni_ide"
-    compileSdk = 35
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
