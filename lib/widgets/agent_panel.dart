@@ -278,7 +278,7 @@ class _StartScreenState extends State<_StartScreen> {
   }
 
   void _copyCommand() {
-    Clipboard.setData(const ClipboardData(text: AgentService.startCommand));
+    Clipboard.setData(ClipboardData(text: AgentService.startCommand));
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text('Copied to clipboard',
           style: T.ui(size: 12, color: T.text)),

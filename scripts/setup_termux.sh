@@ -17,8 +17,8 @@ set -e  # Stop on any error
 
 OMNI_DIR="$HOME/omni-ide"
 AGENT_DIR="$OMNI_DIR/agent"
-REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-REPO_AGENT_DIR="$REPO_DIR/agent"
+REPO_DIR="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd || echo "")"
+REPO_AGENT_DIR="${REPO_DIR:+$REPO_DIR/agent}"
 
 echo "Starting Omni-IDE Environment Setup..."
 
@@ -51,7 +51,7 @@ mkdir -p "$OMNI_DIR/logs"
 echo "Setting up Agent..."
 
 # Try to copy from repo first (if running from a cloned repo)
-if [ -d "$REPO_AGENT_DIR" ] && [ -f "$REPO_AGENT_DIR/agent.js" ]; then
+if [ -n "$REPO_AGENT_DIR" ] && [ -d "$REPO_AGENT_DIR" ] && [ -f "$REPO_AGENT_DIR/agent.js" ]; then
   echo "Found agent in repo at $REPO_AGENT_DIR"
   # Remove old agent dir if it exists
   rm -rf "$AGENT_DIR"

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import '../services/settings_service.dart';
@@ -1017,7 +1018,7 @@ class _ModeSection extends StatelessWidget {
                 const SizedBox(height: T.s_2),
                 GestureDetector(
                   onTap: () {
-                    Clipboard.setData(const ClipboardData(
+                    Clipboard.setData(ClipboardData(
                         text: 'bash <(curl -sL https://raw.githubusercontent.com/M7mD0X/theomni/main/scripts/setup_termux.sh)'));
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                       content: Text('Setup command copied!',

@@ -54,7 +54,10 @@ class CloudAgentService extends ChangeNotifier
   Future<void> connect({bool fromUser = false}) async {
     // Cloud mode is always "connected" — nothing to connect to.
     // Just set the state and notify listeners.
-    _setState(AgentState.connected, 'Cloud Mode \u00b7 ready');
+    // Always reset to connected state even if called multiple times.
+    _state = AgentState.connected;
+    _statusText = 'Cloud Mode \u00b7 ready';
+    flushNotifyListeners();
   }
 
   @override

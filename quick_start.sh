@@ -24,12 +24,12 @@ OMNI_DIR="$HOME/omni-ide"
 AGENT_DIR="$OMNI_DIR/agent"
 
 # Resolve repo agent dir (if running from a cloned repo)
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd || echo "")"
 REPO_AGENT_DIR=""
-if [ -f "$SCRIPT_DIR/agent/agent.js" ]; then
+if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/agent/agent.js" ]; then
   REPO_AGENT_DIR="$SCRIPT_DIR/agent"
-elif [ -f "$SCRIPT_DIR/../agent/agent.js" ]; then
-  REPO_AGENT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)/agent"
+elif [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/../agent/agent.js" ]; then
+  REPO_AGENT_DIR="$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd || echo "")/agent"
 fi
 
 # ── Fast path: already running? ─────────────────────────────────────────────
